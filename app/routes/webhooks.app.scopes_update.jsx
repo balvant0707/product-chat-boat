@@ -1,5 +1,6 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { upsertInstalledShop } from "../models/shop.server";
 
 export const action = async ({ request }) => {
   const { payload, session, topic, shop } = await authenticate.webhook(request);
@@ -16,6 +17,7 @@ export const action = async ({ request }) => {
         scope: current.toString(),
       },
     });
+    await upsertInstalledShop(session);
   }
 
   return new Response();

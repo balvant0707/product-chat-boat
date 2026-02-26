@@ -3,5 +3,5 @@ roles = ["frontend", "backend"]
 webhooks_path = "/webhooks/app/uninstalled"
 
 [commands]
-predev = "npx prisma generate"
-dev = "npx prisma db push && npm exec remix vite:dev"
+predev = "npx prisma generate --schema=prisma/schema.prisma"
+dev = "npx prisma db push --schema=prisma/schema.prisma && npm exec remix vite:dev"
