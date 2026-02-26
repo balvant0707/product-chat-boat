@@ -9,8 +9,8 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
 }
 
 model Session {
@@ -31,4 +31,15 @@ model Session {
   emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+model shop {
+  id            Int       @id @default(autoincrement())
+  shop          String    @unique(map: "Shop_shop_key")
+  accessToken   String?
+  installed     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  onboardedAt   DateTime?
+  uninstalledAt DateTime?
 }
