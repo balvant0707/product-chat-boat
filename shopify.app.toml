@@ -24,4 +24,9 @@ api_version = "2026-04"
 scopes = "write_products"
 
 [auth]
-redirect_urls = [ "https://product-chat-boat.vercel.app/api/auth" ]
+
+redirect_urls = [
+  "https://product-chat-boat.vercel.app/auth/callback",
+  "https://product-chat-boat.vercel.app/shopify/callback",
+  "https://product-chat-boat.vercel.app/api/auth/callback"
+]
