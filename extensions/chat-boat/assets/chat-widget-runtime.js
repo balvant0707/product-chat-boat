@@ -14,6 +14,7 @@
     unread: 0,
     history: loadHistory(config.storageKey),
     products: [],
+    resources: [],
   };
 
   const ui = renderBaseUI(config);
@@ -22,11 +23,19 @@
 
   if (state.history.length === 0) {
     pushMessage(state, config, "bot", config.welcomeMessage, false);
+    pushMessage(
+      state,
+      config,
+      "bot",
+      "Ask about order tracking, product search, discount offers, shipping, or store policies.",
+      false
+    );
   }
 
   renderMessages(ui.messages, state.history, config.botInitials);
   renderQuickReplies(ui.quickReplies, config.quickReplies, sendUserMessage);
   renderProducts(ui.productsTrack, state.products);
+  renderResources(ui.resourcesList, state.resources);
   syncBadge(ui.badge, state.unread);
   syncSendState(ui.input, ui.sendButton, state.busy);
 
@@ -104,11 +113,20 @@
   function clearConversation() {
     state.history = [];
     state.products = [];
+    state.resources = [];
     state.unread = 0;
     pushMessage(state, config, "bot", config.welcomeMessage, false);
+    pushMessage(
+      state,
+      config,
+      "bot",
+      "Ask about order tracking, product search, discount offers, shipping, or store policies.",
+      false
+    );
     syncBadge(ui.badge, state.unread);
     renderMessages(ui.messages, state.history, config.botInitials);
     renderProducts(ui.productsTrack, state.products);
+    renderResources(ui.resourcesList, state.resources);
   }
 
   async function sendUserMessage(rawText) {
@@ -140,13 +158,16 @@
 
     if (!botReply || !botReply.text) {
       botReply = {
-        text: "I could not reach the live assistant. Try asking for product type, color, or budget.",
+        text: "I could not find that. Try asking about order tracking, products, discounts, shipping, or store info.",
         products: [],
+        resources: [],
       };
     }
 
-    state.products = botReply.products.slice(0, 5);
+    state.products = (botReply.products || []).slice(0, 5);
+    state.resources = (botReply.resources || []).slice(0, 6);
     renderProducts(ui.productsTrack, state.products);
+    renderResources(ui.resourcesList, state.resources);
 
     pushMessage(state, config, "bot", botReply.text, !state.open);
     syncBadge(ui.badge, state.unread);
@@ -156,7 +177,22 @@
     state.busy = false;
     syncSendState(ui.input, ui.sendButton, state.busy);
     ui.input.focus();
-  }
+}
+
+const PCB_DEFAULT_QUICK_REPLIES = [
+  "Order tracking",
+  "Product search",
+  "Discount offers",
+  "Shipping info",
+  "Store policies",
+];
+
+const pcbCache = {
+  products: null,
+  searchResults: new Map(),
+  pathStatus: new Map(),
+  policySnippet: new Map(),
+};
 
 function buildConfig(root) {
   const data = root.dataset;
@@ -175,7 +211,7 @@ function buildConfig(root) {
     showOnMobile: data.showMobile !== undefined ? parseBoolean(data.showMobile) : true,
     shop,
     apiUrl: normalizeApiBaseUrl(data.apiUrl),
-    quickReplies,
+    quickReplies: quickReplies.length ? quickReplies : PCB_DEFAULT_QUICK_REPLIES,
     storageKey: `pcb-history:${shop}`,
   };
 }
@@ -271,10 +307,17 @@ function renderBaseUI(config) {
   products.appendChild(productsLabel);
   products.appendChild(productsTrack);
 
+  const resources = createElement("div", "pcb-resources pcb-hidden");
+  const resourcesLabel = createElement("div", "pcb-resources-label");
+  resourcesLabel.textContent = "Helpful store links";
+  const resourcesList = createElement("div", "pcb-resources-list");
+  resources.appendChild(resourcesLabel);
+  resources.appendChild(resourcesList);
+
   const inputRow = createElement("div", "pcb-input-row");
   const input = createElement("input", "pcb-input", {
     type: "text",
-    placeholder: "Type your message...",
+    placeholder: "Ask about order, product, discount, shipping...",
     maxlength: "400",
     "aria-label": "Message",
   });
@@ -291,6 +334,7 @@ function renderBaseUI(config) {
   panel.appendChild(typing);
   panel.appendChild(quickReplies);
   panel.appendChild(products);
+  panel.appendChild(resources);
   panel.appendChild(inputRow);
   panel.appendChild(footer);
 
@@ -305,6 +349,8 @@ function renderBaseUI(config) {
     quickReplies,
     products,
     productsTrack,
+    resources,
+    resourcesList,
     input,
     sendButton,
   };
@@ -406,6 +452,46 @@ function renderProducts(track, products) {
   parent.classList.remove("pcb-hidden");
 }
 
+function renderResources(list, resources) {
+  list.innerHTML = "";
+  const parent = list.parentElement;
+  if (!parent) {
+    return;
+  }
+
+  if (!resources.length) {
+    parent.classList.add("pcb-hidden");
+    return;
+  }
+
+  resources.forEach((resource) => {
+    const card = createElement("a", "pcb-resource-card", {
+      href: resource.url || "#",
+      title: resource.title || "Store link",
+    });
+
+    const top = createElement("div", "pcb-resource-top");
+    const title = createElement("div", "pcb-resource-title");
+    title.textContent = resource.title || "Store link";
+    const type = createElement("span", "pcb-resource-type");
+    type.textContent = resource.type || "Info";
+    top.appendChild(title);
+    top.appendChild(type);
+
+    card.appendChild(top);
+
+    if (resource.description) {
+      const description = createElement("div", "pcb-resource-desc");
+      description.textContent = resource.description;
+      card.appendChild(description);
+    }
+
+    list.appendChild(card);
+  });
+
+  parent.classList.remove("pcb-hidden");
+}
+
 async function fetchBotReply(config, history, userText) {
   if (config.apiUrl) {
     const apiReply = await requestReplyFromApi(config, history, userText);
@@ -447,6 +533,7 @@ async function requestReplyFromApi(config, history, userText) {
       return {
         text,
         products: normalizeProducts(data.products || data.recommendations || []),
+        resources: normalizeResources(data.resources || data.links || []),
       };
     } catch (_error) {
       continue;
@@ -457,7 +544,10 @@ async function requestReplyFromApi(config, history, userText) {
 }
 
 function buildCandidateEndpoints(baseUrl) {
-  const normalized = baseUrl.replace(/\/+$/, "");
+  const normalized = String(baseUrl || "").replace(/\/+$/, "");
+  if (!normalized) {
+    return [];
+  }
   if (/\/chat$/i.test(normalized)) {
     return [normalized];
   }
@@ -469,37 +559,250 @@ function buildCandidateEndpoints(baseUrl) {
 }
 
 async function fallbackReply(userText) {
-  const products = await searchStorefrontProducts(userText);
+  const query = String(userText || "").trim();
+  const intent = detectIntent(query);
+
+  if (intent === "order") {
+    return orderTrackingReply();
+  }
+  if (intent === "discount") {
+    return discountReply(query);
+  }
+  if (intent === "shipping") {
+    return shippingReply();
+  }
+  if (intent === "store") {
+    return storeSearchReply(query);
+  }
+  if (intent === "product") {
+    return productReply(query);
+  }
+
+  return generalSearchReply(query);
+}
+
+function detectIntent(text) {
+  const query = String(text || "").toLowerCase();
+  if (matchesAny(query, ["order", "track", "tracking", "where is my order", "awb"])) {
+    return "order";
+  }
+  if (matchesAny(query, ["discount", "coupon", "promo", "offer", "sale", "% off"])) {
+    return "discount";
+  }
+  if (matchesAny(query, ["shipping", "delivery", "dispatch", "courier", "eta"])) {
+    return "shipping";
+  }
+  if (matchesAny(query, ["policy", "return", "refund", "contact", "about", "store", "faq"])) {
+    return "store";
+  }
+  if (matchesAny(query, ["product", "search", "find", "show", "buy", "item", "collection"])) {
+    return "product";
+  }
+  return "general";
+}
+
+async function orderTrackingReply() {
+  const resources = await collectKnownResources([
+    { title: "Track your order", type: "Tracking", paths: ["/pages/track-order", "/pages/order-tracking", "/pages/track"] },
+    { title: "Your account orders", type: "Account", paths: ["/account"] },
+    { title: "Contact support", type: "Support", paths: ["/pages/contact", "/contact"] },
+  ]);
+
+  return {
+    text: resources.length
+      ? "Use the links below to track your order and get latest shipping status."
+      : "Please log in to your account orders page or contact support with your order number.",
+    products: [],
+    resources,
+  };
+}
+
+async function productReply(query) {
+  const products = await searchStorefrontProducts(query);
   if (products.length) {
     return {
-      text: `I found ${products.length} products that match "${userText}". Here are my top picks.`,
+      text: `I found ${products.length} products for "${query}".`,
       products,
+      resources: [],
     };
   }
 
   return {
-    text:
-      "I can help with product discovery. Try asking things like: shoes under $100, blue hoodie, or best sellers.",
-    products: [],
+    text: "I could not find an exact match. Here are products from the store.",
+    products: await getTopProducts(),
+    resources: [],
   };
 }
 
-async function searchStorefrontProducts(queryText) {
-  const query = (queryText || "").trim();
+async function discountReply(query) {
+  const products = await findDiscountedProducts(query);
+  const resources = await collectKnownResources([
+    { title: "View all products", type: "Catalog", paths: ["/collections/all"] },
+  ]);
+
+  if (products.length) {
+    return {
+      text: "I found discounted products currently available.",
+      products,
+      resources,
+    };
+  }
+
+  return {
+    text: "I could not detect discounted products right now from storefront data.",
+    products: [],
+    resources,
+  };
+}
+
+async function shippingReply() {
+  const resources = await collectKnownResources([
+    { title: "Shipping policy", type: "Policy", paths: ["/policies/shipping-policy"] },
+    { title: "Return policy", type: "Policy", paths: ["/policies/refund-policy", "/policies/return-policy"] },
+    { title: "Contact support", type: "Support", paths: ["/pages/contact", "/contact"] },
+  ]);
+  const snippet = await fetchPolicySnippet("/policies/shipping-policy");
+
+  return {
+    text: snippet
+      ? `Shipping details: ${snippet}`
+      : "Shipping timelines depend on location and courier. Open shipping policy for full details.",
+    products: [],
+    resources,
+  };
+}
+
+async function storeSearchReply(query) {
+  const results = await searchStorefrontResources(query);
+  if (results.products.length || results.resources.length) {
+    return {
+      text: `I found store results for "${query}".`,
+      products: results.products,
+      resources: results.resources,
+    };
+  }
+
+  return {
+    text: "No exact store result found. Try keywords like return policy, contact, or shipping.",
+    products: [],
+    resources: await collectKnownResources([
+      { title: "Contact us", type: "Support", paths: ["/pages/contact", "/contact"] },
+      { title: "All collections", type: "Catalog", paths: ["/collections/all"] },
+    ]),
+  };
+}
+
+async function generalSearchReply(query) {
   if (!query) {
+    return {
+      text: "Ask me about order tracking, products, discounts, shipping, or store policies.",
+      products: [],
+      resources: [],
+    };
+  }
+
+  const results = await searchStorefrontResources(query);
+  if (results.products.length || results.resources.length) {
+    return {
+      text: `Here is what I found for "${query}".`,
+      products: results.products,
+      resources: results.resources,
+    };
+  }
+
+  return {
+    text: "I could not find relevant results. Try a more specific query.",
+    products: [],
+    resources: [],
+  };
+}
+
+async function searchStorefrontResources(queryText) {
+  const query = String(queryText || "").trim();
+  if (!query) {
+    return { products: [], resources: [] };
+  }
+
+  const key = query.toLowerCase();
+  if (pcbCache.searchResults.has(key)) {
+    return pcbCache.searchResults.get(key);
+  }
+
+  try {
+    const url = `/search/suggest.json?q=${encodeURIComponent(query)}&resources[type]=product,page,collection,article&resources[limit]=6&resources[options][unavailable_products]=last`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const fallback = { products: await searchStorefrontProducts(query), resources: [] };
+      pcbCache.searchResults.set(key, fallback);
+      return fallback;
+    }
+
+    const data = await response.json();
+    const results = data && data.resources && data.resources.results ? data.resources.results : {};
+    const products = normalizePredictiveProducts(results.products || []).slice(0, 5);
+    const pages = normalizeLinkResources(results.pages || [], "Page");
+    const collections = normalizeLinkResources(results.collections || [], "Collection");
+    const articles = normalizeLinkResources(results.articles || [], "Article");
+    const shaped = {
+      products,
+      resources: [...pages, ...collections, ...articles].slice(0, 6),
+    };
+
+    pcbCache.searchResults.set(key, shaped);
+    return shaped;
+  } catch (_error) {
+    const fallback = { products: await searchStorefrontProducts(query), resources: [] };
+    pcbCache.searchResults.set(key, fallback);
+    return fallback;
+  }
+}
+
+function normalizePredictiveProducts(rawProducts) {
+  if (!Array.isArray(rawProducts)) {
     return [];
   }
 
-  let products = [];
-  try {
-    const response = await fetch("/products.json?limit=24");
-    if (!response.ok) {
-      return [];
-    }
-    const data = await response.json();
-    products = Array.isArray(data.products) ? data.products : [];
-  } catch (_error) {
+  return rawProducts.map((item) => {
+    const minPrice = item && item.price ? item.price.min_variant_price : null;
+    const price = minPrice && minPrice.amount
+      ? `${minPrice.currency_code || ""} ${minPrice.amount}`.trim()
+      : "";
+    return {
+      title: item.title || "Product",
+      url: item.url || "#",
+      image: item.featured_image && item.featured_image.url ? item.featured_image.url : "",
+      price,
+    };
+  });
+}
+
+function normalizeLinkResources(items, type) {
+  if (!Array.isArray(items)) {
     return [];
+  }
+
+  return items.map((item) => ({
+    title: item.title || type,
+    url: item.url || "#",
+    type,
+    description: "Open details",
+  }));
+}
+
+async function getTopProducts() {
+  const products = await fetchStoreProducts();
+  return products.slice(0, 5).map((product) => normalizeStorefrontProduct(product));
+}
+
+async function searchStorefrontProducts(queryText) {
+  const query = String(queryText || "").trim();
+  const products = await fetchStoreProducts();
+  if (!products.length) {
+    return [];
+  }
+
+  if (!query) {
+    return products.slice(0, 5).map((product) => normalizeStorefrontProduct(product));
   }
 
   const tokens = tokenize(query);
@@ -507,7 +810,7 @@ async function searchStorefrontProducts(queryText) {
     return [];
   }
 
-  const scored = products
+  return products
     .map((product) => ({
       product,
       score: scoreProduct(product, tokens),
@@ -516,19 +819,145 @@ async function searchStorefrontProducts(queryText) {
     .sort((a, b) => b.score - a.score)
     .slice(0, 5)
     .map((row) => normalizeStorefrontProduct(row.product));
+}
 
-  return scored;
+async function findDiscountedProducts(queryText) {
+  const products = await fetchStoreProducts();
+  const tokens = tokenize(queryText || "");
+
+  return products
+    .map((product) => {
+      const variant = Array.isArray(product.variants) && product.variants.length ? product.variants[0] : null;
+      if (!variant) {
+        return null;
+      }
+
+      const price = Number(variant.price || 0);
+      const compareAt = Number(variant.compare_at_price || 0);
+      if (!(compareAt > price && price > 0)) {
+        return null;
+      }
+
+      if (tokens.length && scoreProduct(product, tokens) === 0) {
+        return null;
+      }
+
+      return {
+        product,
+        saved: compareAt - price,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.saved - a.saved)
+    .slice(0, 5)
+    .map((row) => {
+      const normalized = normalizeStorefrontProduct(row.product);
+      return {
+        ...normalized,
+        price: `${normalized.price} (Save ${formatPrice(row.saved)})`,
+      };
+    });
+}
+
+async function fetchStoreProducts() {
+  if (Array.isArray(pcbCache.products)) {
+    return pcbCache.products;
+  }
+
+  try {
+    const response = await fetch("/products.json?limit=120");
+    if (!response.ok) {
+      pcbCache.products = [];
+      return pcbCache.products;
+    }
+    const data = await response.json();
+    pcbCache.products = Array.isArray(data.products) ? data.products : [];
+    return pcbCache.products;
+  } catch (_error) {
+    pcbCache.products = [];
+    return pcbCache.products;
+  }
+}
+
+async function collectKnownResources(definitions) {
+  const resources = [];
+  for (const definition of definitions) {
+    const path = await findFirstReachablePath(definition.paths || []);
+    if (!path) {
+      continue;
+    }
+    resources.push({
+      title: definition.title,
+      type: definition.type || "Info",
+      url: path,
+      description: `Open ${definition.title.toLowerCase()}`,
+    });
+  }
+  return resources;
+}
+
+async function findFirstReachablePath(paths) {
+  for (const path of paths) {
+    if (!path) {
+      continue;
+    }
+
+    if (pcbCache.pathStatus.has(path)) {
+      if (pcbCache.pathStatus.get(path)) {
+        return path;
+      }
+      continue;
+    }
+
+    try {
+      const response = await fetch(path);
+      const ok = response.ok;
+      pcbCache.pathStatus.set(path, ok);
+      if (ok) {
+        return path;
+      }
+    } catch (_error) {
+      pcbCache.pathStatus.set(path, false);
+    }
+  }
+  return "";
+}
+
+async function fetchPolicySnippet(path) {
+  if (pcbCache.policySnippet.has(path)) {
+    return pcbCache.policySnippet.get(path);
+  }
+
+  try {
+    const response = await fetch(path);
+    if (!response.ok) {
+      pcbCache.policySnippet.set(path, "");
+      return "";
+    }
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const text = (doc.body && doc.body.textContent ? doc.body.textContent : "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const snippet = text.length > 220 ? `${text.slice(0, 220)}...` : text;
+    pcbCache.policySnippet.set(path, snippet);
+    return snippet;
+  } catch (_error) {
+    pcbCache.policySnippet.set(path, "");
+    return "";
+  }
 }
 
 function normalizeStorefrontProduct(product) {
   const variant = Array.isArray(product.variants) && product.variants.length ? product.variants[0] : null;
-  const rawPrice = variant && variant.price ? String(variant.price) : "";
+  const rawPrice = variant && variant.price ? Number(variant.price) : 0;
   const handle = product.handle || "";
   const image = Array.isArray(product.images) && product.images.length ? product.images[0] : "";
 
   return {
     title: product.title || "Product",
-    price: rawPrice ? `$${rawPrice}` : "",
+    price: rawPrice > 0 ? formatPrice(rawPrice) : "",
     url: handle ? `/products/${handle}` : "#",
     image: typeof image === "string" ? image : "",
   };
@@ -573,6 +1002,21 @@ function normalizeProducts(rawProducts) {
       };
     })
     .filter((item) => item.title);
+}
+
+function normalizeResources(rawResources) {
+  if (!Array.isArray(rawResources)) {
+    return [];
+  }
+
+  return rawResources
+    .map((item) => ({
+      title: String(item.title || item.name || "Store link"),
+      url: String(item.url || item.link || "#"),
+      type: String(item.type || "Info"),
+      description: String(item.description || "Open details"),
+    }))
+    .filter((item) => item.title && item.url);
 }
 
 function normalizeReplyText(data) {
