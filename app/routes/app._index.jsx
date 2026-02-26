@@ -63,11 +63,11 @@ const STATUS_TONE = { active: "success", resolved: "info", pending: "attention" 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({ title, value, trend, trendUp, subtitle }) {
   return (
-    <Card>
-      <BlockStack gap="200">
+    <Card padding="300">
+      <BlockStack gap="100">
         <Text as="p" variant="bodySm" tone="subdued">{title}</Text>
         <InlineStack align="space-between" blockAlign="end">
-          <Text as="p" variant="heading2xl" fontWeight="bold">{value}</Text>
+          <Text as="p" variant="headingLg" fontWeight="bold">{value}</Text>
           {trend && (
             <Badge tone={trendUp ? "success" : "critical"}>
               {trendUp ? "▲" : "▼"} {trend}
@@ -75,7 +75,7 @@ function StatCard({ title, value, trend, trendUp, subtitle }) {
           )}
         </InlineStack>
         {subtitle && (
-          <Text as="p" variant="bodySm" tone="subdued">{subtitle}</Text>
+          <Text as="p" variant="bodyXs" tone="subdued">{subtitle}</Text>
         )}
       </BlockStack>
     </Card>
@@ -228,7 +228,7 @@ export default function Dashboard() {
             { title: "Products Recommended", value: "876", trend: "23%", trendUp: true, subtitle: "this month" },
             { title: "Conversion Rate", value: "6.4%", trend: "1.2%", trendUp: false, subtitle: "chat-to-purchase" },
           ].map((stat) => (
-            <Layout.Section key={stat.title} variant="oneQuarter">
+            <Layout.Section key={stat.title} variant="oneFourth">
               <StatCard {...stat} />
             </Layout.Section>
           ))}
