@@ -1,0 +1,109 @@
+{% comment %}
+  Chat Boat App Embed Block
+  Target: body (floats on all storefront pages)
+{% endcomment %}
+
+<div
+  id="pcb-root"
+  class="pcb-{{ block.settings.position }}"
+  data-bot-name="{{ block.settings.bot_name | escape }}"
+  data-welcome="{{ block.settings.welcome_message | escape }}"
+  data-color="{{ block.settings.primary_color }}"
+  data-position="{{ block.settings.position }}"
+  data-btn-size="{{ block.settings.button_size }}"
+  data-auto-open="{{ block.settings.open_on_load }}"
+  data-show-mobile="{{ block.settings.show_on_mobile }}"
+  data-shop="{{ shop.permanent_domain }}"
+  data-api-url="{{ block.settings.app_url | default: '' }}"
+  data-quick-replies="{{ block.settings.quick_replies | escape }}"
+  {{ block.shopify_attributes }}
+></div>
+
+{% schema %}
+{
+  "name": "Chat Boat Embed",
+  "target": "body",
+  "javascript": "chat-widget.js",
+  "stylesheet": "chat-widget.css",
+  "settings": [
+    {
+      "type": "header",
+      "content": "General"
+    },
+    {
+      "type": "text",
+      "id": "bot_name",
+      "label": "Bot Name",
+      "default": "Shop Assistant"
+    },
+    {
+      "type": "textarea",
+      "id": "welcome_message",
+      "label": "Welcome Message",
+      "default": "Hi! I am here to help you find the perfect product. What are you looking for today?"
+    },
+    {
+      "type": "text",
+      "id": "quick_replies",
+      "label": "Quick Reply Chips (comma separated)",
+      "info": "Shortcut buttons shown to the customer e.g. Best sellers, On sale",
+      "default": "Best sellers,What's on sale?,Gift ideas"
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "primary_color",
+      "label": "Primary Color",
+      "default": "#008060"
+    },
+    {
+      "type": "select",
+      "id": "position",
+      "label": "Widget Position",
+      "options": [
+        { "value": "bottom-right", "label": "Bottom Right" },
+        { "value": "bottom-left", "label": "Bottom Left" }
+      ],
+      "default": "bottom-right"
+    },
+    {
+      "type": "range",
+      "id": "button_size",
+      "label": "Button Size (px)",
+      "min": 44,
+      "max": 72,
+      "step": 4,
+      "default": 56
+    },
+    {
+      "type": "header",
+      "content": "Behavior"
+    },
+    {
+      "type": "checkbox",
+      "id": "open_on_load",
+      "label": "Auto-open chat on page load",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "show_on_mobile",
+      "label": "Show on mobile devices",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "API Connection"
+    },
+    {
+      "type": "text",
+      "id": "app_url",
+      "label": "App URL",
+      "info": "Your Shopify app base URL, e.g. https://your-app.fly.dev"
+    }
+  ]
+}
+{% endschema %}

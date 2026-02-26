@@ -1,0 +1,596 @@
+/* ============================================================
+   PRODUCT CHATBOT WIDGET  — chat-widget.css
+   Prefix: pcb-  (Product Chat Boat)
+   All styles are scoped to #pcb-root to avoid theme conflicts
+   ============================================================ */
+
+/* ── CSS Custom Properties (overridden by JS) ─────────────── */
+:root {
+  --pcb-color:       #008060;
+  --pcb-color-dark:  #005a45;
+  --pcb-btn-size:    56px;
+  --pcb-z:           2147483000;
+  --pcb-radius:      16px;
+  --pcb-shadow:      0 8px 40px rgba(0, 0, 0, 0.18);
+  --pcb-font:        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --pcb-ease:        0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Box-sizing reset (scoped) ──────────────────────────────── */
+#pcb-root,
+#pcb-root *,
+#pcb-root *::before,
+#pcb-root *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: var(--pcb-font);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Root container ─────────────────────────────────────────── */
+#pcb-root {
+  position: fixed;
+  z-index: var(--pcb-z);
+  font-size: 14px;
+}
+
+#pcb-root.pcb-bottom-right { bottom: 24px; right: 24px; }
+#pcb-root.pcb-bottom-left  { bottom: 24px; left: 24px; }
+
+/* ══════════════════════════════════════════════════════════════
+   TOGGLE BUTTON
+   ══════════════════════════════════════════════════════════════ */
+.pcb-toggle {
+  width:  var(--pcb-btn-size);
+  height: var(--pcb-btn-size);
+  background: var(--pcb-color);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), 0 0 0 0 rgba(0, 128, 96, 0.4);
+  transition:
+    transform var(--pcb-ease),
+    box-shadow var(--pcb-ease);
+  animation: pcb-pulse 3s infinite;
+}
+
+.pcb-toggle:hover {
+  transform: scale(1.08);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  animation: none;
+}
+
+.pcb-toggle:active { transform: scale(0.94); }
+
+@keyframes pcb-pulse {
+  0%   { box-shadow: 0 4px 20px rgba(0,0,0,0.25), 0 0 0 0   rgba(0,128,96,0.4); }
+  70%  { box-shadow: 0 4px 20px rgba(0,0,0,0.25), 0 0 0 12px rgba(0,128,96,0);   }
+  100% { box-shadow: 0 4px 20px rgba(0,0,0,0.25), 0 0 0 0   rgba(0,128,96,0);   }
+}
+
+/* Icons inside toggle */
+.pcb-toggle-icon {
+  position: absolute;
+  width: 26px; height: 26px;
+  fill: white;
+  transition: opacity var(--pcb-ease), transform var(--pcb-ease);
+}
+
+.pcb-toggle-icon--chat  { opacity: 1; transform: scale(1)    rotate(0deg); }
+.pcb-toggle-icon--close { opacity: 0; transform: scale(0.5)  rotate(90deg); }
+
+.pcb-toggle.pcb-open .pcb-toggle-icon--chat  { opacity: 0; transform: scale(0.5)  rotate(-90deg); }
+.pcb-toggle.pcb-open .pcb-toggle-icon--close { opacity: 1; transform: scale(1)    rotate(0deg); }
+.pcb-toggle.pcb-open { animation: none; }
+
+/* Unread badge */
+.pcb-badge {
+  position: absolute;
+  top: -2px; right: -2px;
+  min-width: 18px; height: 18px;
+  background: #e44335;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  line-height: 1;
+  transform: scale(1);
+  transition: transform 0.2s;
+}
+
+.pcb-badge.pcb-hidden { transform: scale(0); }
+
+/* ══════════════════════════════════════════════════════════════
+   CHAT PANEL
+   ══════════════════════════════════════════════════════════════ */
+.pcb-panel {
+  position: absolute;
+  bottom: calc(var(--pcb-btn-size) + 14px);
+  width: 360px;
+  height: 510px;
+  background: #fff;
+  border-radius: var(--pcb-radius);
+  box-shadow: var(--pcb-shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  /* Closed state */
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.9) translateY(16px);
+  transform-origin: bottom center;
+  transition: opacity var(--pcb-ease), transform var(--pcb-ease);
+}
+
+#pcb-root.pcb-bottom-right .pcb-panel { right: 0; }
+#pcb-root.pcb-bottom-left  .pcb-panel { left: 0; }
+
+/* Open state */
+.pcb-panel.pcb-open {
+  opacity: 1;
+  pointer-events: all;
+  transform: scale(1) translateY(0);
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.pcb-header {
+  background: var(--pcb-color);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.pcb-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.pcb-avatar {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.pcb-avatar::after {
+  content: '';
+  position: absolute;
+  bottom: 1px; right: 1px;
+  width: 10px; height: 10px;
+  background: #4caf50;
+  border: 2px solid rgba(255,255,255,0.5);
+  border-radius: 50%;
+}
+
+.pcb-header-text { min-width: 0; flex: 1; }
+
+.pcb-header-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.pcb-header-status {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  margin-top: 2px;
+}
+
+.pcb-header-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.pcb-header-btn:hover { background: rgba(255, 255, 255, 0.28); }
+.pcb-header-btn svg { width: 16px; height: 16px; fill: #fff; }
+
+/* ── Messages Scroll Area ───────────────────────────────────── */
+.pcb-messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f6f7f8;
+  scroll-behavior: smooth;
+}
+
+.pcb-messages::-webkit-scrollbar { width: 4px; }
+.pcb-messages::-webkit-scrollbar-track { background: transparent; }
+.pcb-messages::-webkit-scrollbar-thumb { background: #d5d5d5; border-radius: 2px; }
+
+/* ── Message Rows ───────────────────────────────────────────── */
+.pcb-msg {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  max-width: 100%;
+  animation: pcb-msg-in 0.2s ease;
+}
+
+@keyframes pcb-msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pcb-msg--user { flex-direction: row-reverse; }
+
+.pcb-msg-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--pcb-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.pcb-msg--user .pcb-msg-avatar {
+  background: #e5e5e5;
+  color: #666;
+}
+
+/* Bubble */
+.pcb-bubble {
+  max-width: 74%;
+  padding: 9px 13px;
+  border-radius: 16px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.pcb-msg--bot  .pcb-bubble {
+  background: #fff;
+  color: #111;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.pcb-msg--user .pcb-bubble {
+  background: var(--pcb-color);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+/* Timestamp */
+.pcb-msg-meta {
+  display: flex;
+  padding: 0 4px;
+}
+
+.pcb-msg--user .pcb-msg-meta { flex-direction: row-reverse; }
+
+.pcb-msg-time {
+  font-size: 10px;
+  color: #b0b0b0;
+  margin-top: 3px;
+}
+
+/* ── Typing Indicator ───────────────────────────────────────── */
+.pcb-typing {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 4px 12px 0;
+  background: #f6f7f8;
+  animation: pcb-msg-in 0.2s ease;
+}
+
+.pcb-typing-bubble {
+  background: #fff;
+  border-radius: 16px;
+  border-bottom-left-radius: 4px;
+  padding: 11px 14px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.pcb-typing-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #c0c0c0;
+  animation: pcb-dot-bounce 1.3s infinite;
+  display: block;
+}
+
+.pcb-typing-dot:nth-child(2) { animation-delay: 0.18s; }
+.pcb-typing-dot:nth-child(3) { animation-delay: 0.36s; }
+
+@keyframes pcb-dot-bounce {
+  0%, 55%, 100% { transform: translateY(0);   background: #c0c0c0; }
+  27%            { transform: translateY(-6px); background: #888;    }
+}
+
+/* ── Quick Replies ──────────────────────────────────────────── */
+.pcb-quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  background: #f6f7f8;
+}
+
+.pcb-chip {
+  background: #fff;
+  border: 1.5px solid var(--pcb-color);
+  color: var(--pcb-color);
+  padding: 5px 13px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.pcb-chip:hover {
+  background: var(--pcb-color);
+  color: #fff;
+}
+
+/* ── Product Cards ──────────────────────────────────────────── */
+.pcb-products {
+  padding: 6px 12px 8px;
+  background: #f6f7f8;
+}
+
+.pcb-products-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.pcb-products-track {
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pcb-products-track::-webkit-scrollbar { height: 2px; }
+.pcb-products-track::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+
+.pcb-product-card {
+  flex-shrink: 0;
+  width: 134px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #eee;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  scroll-snap-align: start;
+  text-decoration: none;
+  color: inherit;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.pcb-product-card:hover {
+  box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+  transform: translateY(-2px);
+}
+
+.pcb-product-img {
+  width: 100%; height: 96px;
+  object-fit: cover;
+  display: block;
+  background: #f0f0f0;
+}
+
+.pcb-product-img-placeholder {
+  width: 100%; height: 96px;
+  background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: #bbb;
+}
+
+.pcb-product-info {
+  padding: 7px 8px 5px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pcb-product-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pcb-product-price {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--pcb-color);
+}
+
+.pcb-product-btn {
+  display: block;
+  text-align: center;
+  padding: 7px 6px;
+  background: var(--pcb-color);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.pcb-product-btn:hover { opacity: 0.88; }
+
+/* ── Input Row ──────────────────────────────────────────────── */
+.pcb-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-top: 1px solid #ebebeb;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.pcb-input {
+  flex: 1;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 22px;
+  padding: 8px 15px;
+  font-size: 13.5px;
+  color: #111;
+  outline: none;
+  background: #f8f9fa;
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.pcb-input:focus {
+  border-color: var(--pcb-color);
+  background: #fff;
+}
+
+.pcb-input::placeholder { color: #bbb; }
+
+.pcb-send {
+  width: 38px; height: 38px;
+  background: var(--pcb-color);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.pcb-send:hover   { opacity: 0.88; transform: scale(1.06); }
+.pcb-send:active  { transform: scale(0.94); }
+.pcb-send:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+.pcb-send svg { width: 18px; height: 18px; fill: #fff; }
+
+/* ── Footer ─────────────────────────────────────────────────── */
+.pcb-footer {
+  text-align: center;
+  padding: 4px 0 7px;
+  font-size: 10px;
+  color: #ccc;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.pcb-footer a { color: #ccc; text-decoration: none; }
+.pcb-footer a:hover { color: #aaa; }
+
+/* ══════════════════════════════════════════════════════════════
+   UTILITY
+   ══════════════════════════════════════════════════════════════ */
+.pcb-hidden { display: none !important; }
+
+/* ══════════════════════════════════════════════════════════════
+   MOBILE  (≤ 480px)
+   ══════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  /* Fix root to viewport corner (toggle floats independently) */
+  #pcb-root {
+    bottom: 0 !important;
+    right:  0 !important;
+    left:   0 !important;
+  }
+
+  /* Toggle button sticks to corner */
+  .pcb-toggle {
+    position: fixed;
+    bottom: 20px;
+    right:  20px;
+    left:   auto !important;
+  }
+
+  #pcb-root.pcb-bottom-left .pcb-toggle {
+    right: auto;
+    left: 20px !important;
+  }
+
+  /* Panel goes full screen */
+  .pcb-panel {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width:  100% !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    border-radius: 0;
+    /* override the scale animation with slide-up */
+    transform: translateY(100%);
+    opacity: 1;
+  }
+
+  .pcb-panel.pcb-open {
+    transform: translateY(0);
+    opacity:   1;
+  }
+}
