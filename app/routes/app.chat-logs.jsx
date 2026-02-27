@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import {
   Page,
   Layout,
+  InlineGrid,
   Card,
   Text,
   BlockStack,
@@ -245,30 +246,28 @@ export default function ChatLogs() {
           </Banner>
         ) : null}
 
-        <Layout>
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
           {[
             { label: "Total Conversations", value: kpi.total, tone: undefined },
             { label: "Resolved", value: kpi.resolved, tone: "success" },
             { label: "Pending", value: kpi.pending, tone: "attention" },
             { label: "Avg. Messages", value: kpi.avgMsgs, tone: undefined },
           ].map(({ label, value, tone }) => (
-            <Layout.Section key={label} variant="oneQuarter">
-              <Card>
-                <BlockStack gap="100">
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {label}
+            <Card key={label}>
+              <BlockStack gap="100">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {label}
+                </Text>
+                <InlineStack blockAlign="center" gap="200">
+                  <Text as="p" variant="heading2xl" fontWeight="bold">
+                    {value}
                   </Text>
-                  <InlineStack blockAlign="center" gap="200">
-                    <Text as="p" variant="heading2xl" fontWeight="bold">
-                      {value}
-                    </Text>
-                    {tone ? <Badge tone={tone}>{label.toLowerCase()}</Badge> : null}
-                  </InlineStack>
-                </BlockStack>
-              </Card>
-            </Layout.Section>
+                  {tone ? <Badge tone={tone}>{label.toLowerCase()}</Badge> : null}
+                </InlineStack>
+              </BlockStack>
+            </Card>
           ))}
-        </Layout>
+        </InlineGrid>
 
         {selectedResources.length > 0 ? (
           <Banner tone="warning" title={`${selectedResources.length} conversation(s) selected`}>

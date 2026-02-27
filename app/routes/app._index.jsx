@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   Page,
   Layout,
+  InlineGrid,
   Card,
   Text,
   BlockStack,
@@ -269,18 +270,16 @@ export default function Dashboard() {
           </Banner>
         ) : null}
 
-        <Layout>
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
           {[
             { title: "Total Conversations", value: kpi.total.toString(), subtitle: "From stored chat logs" },
             { title: "Active Conversations", value: kpi.active.toString(), subtitle: "Currently open" },
             { title: "Resolved Conversations", value: kpi.resolved.toString(), subtitle: "Marked resolved" },
             { title: "Products Synced", value: topProducts.length.toString(), subtitle: "Latest Shopify products" },
           ].map((stat) => (
-            <Layout.Section key={stat.title} variant="oneFourth">
-              <StatCard {...stat} />
-            </Layout.Section>
+            <StatCard key={stat.title} {...stat} />
           ))}
-        </Layout>
+        </InlineGrid>
 
         <Layout>
           <Layout.Section>

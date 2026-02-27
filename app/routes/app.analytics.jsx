@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import {
   Page,
   Layout,
+  InlineGrid,
   Card,
   Text,
   BlockStack,
@@ -442,7 +443,7 @@ export default function Analytics() {
           </Box>
         </InlineStack>
 
-        <Layout>
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
           {[
             {
               title: "Total Sessions",
@@ -465,11 +466,9 @@ export default function Analytics() {
               subtitle: "Resolved conversations / total sessions",
             },
           ].map((stat) => (
-            <Layout.Section key={stat.title} variant="oneQuarter">
-              <StatCard {...stat} />
-            </Layout.Section>
+            <StatCard key={stat.title} {...stat} />
           ))}
-        </Layout>
+        </InlineGrid>
 
         <Card padding="0">
           <Tabs tabs={tabs} selected={selectedTab} onSelect={handleTabChange}>

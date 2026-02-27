@@ -359,9 +359,11 @@ function renderBaseUI(config) {
 function renderMessages(container, history, botInitials) {
   container.innerHTML = "";
   history.forEach((entry) => {
-    const row = createElement("div", `pcb-msg pcb-msg--${entry.role === "user" ? "user" : "bot"}`);
+    const role = entry.role === "user" ? "user" : "bot";
+    const item = createElement("div", `pcb-msg-item pcb-msg-item--${role}`);
+    const row = createElement("div", `pcb-msg pcb-msg--${role}`);
     const avatar = createElement("div", "pcb-msg-avatar");
-    avatar.textContent = entry.role === "user" ? "You" : botInitials;
+    avatar.textContent = role === "user" ? "Y" : botInitials;
 
     const bubble = createElement("div", "pcb-bubble");
     bubble.textContent = entry.text;
@@ -369,13 +371,13 @@ function renderMessages(container, history, botInitials) {
     row.appendChild(bubble);
 
     const meta = createElement("div", "pcb-msg-meta");
-    meta.style.justifyContent = entry.role === "user" ? "flex-end" : "flex-start";
     const time = createElement("span", "pcb-msg-time");
     time.textContent = formatClock(entry.timestamp);
     meta.appendChild(time);
 
-    container.appendChild(row);
-    container.appendChild(meta);
+    item.appendChild(row);
+    item.appendChild(meta);
+    container.appendChild(item);
   });
 }
 
