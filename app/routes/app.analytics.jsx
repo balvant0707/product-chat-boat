@@ -19,14 +19,17 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
+import { listConversations } from "../models/chatbot.server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const loader = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
 
-  const products = await fetchTopProducts(admin, 12);
-  const conversations = [];
+  const [products, conversations] = await Promise.all([
+    fetchTopProducts(admin, 12),
+    listConversations(session.shop, { take: 1000 }),
+  ]);
 
   return { products, conversations };
 };

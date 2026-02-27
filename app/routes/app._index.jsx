@@ -21,6 +21,13 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
+import {
+  buildSetupSteps,
+  getOnboardingProgress,
+  getOrCreateSettings,
+  listConversations,
+  summarizeConversations,
+} from "../models/chatbot.server";
 
 const STATUS_TABS = [
   { id: "all", content: "All" },
@@ -32,41 +39,44 @@ const STATUS_TABS = [
 const STATUS_TONE = { active: "success", resolved: "info", pending: "attention" };
 
 export const loader = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
 
-  const conversations = [];
-  const topProducts = await fetchTopProducts(admin, 7);
-  const kpi = summarizeConversations(conversations);
+  const [conversationLogs, topProducts, onboardingProgress, settings] = await Promise.all([
+    listConversations(session.shop, { take: 30 }),
+    fetchTopProducts(admin, 7),
+    getOnboardingProgress(session.shop),
+    getOrCreateSettings(session.shop),
+  ]);
+  const kpi = summarizeConversations(conversationLogs);
+  const conversations = conversationLogs.map((conversation) => ({
+    id: conversation.id,
+    name: conversation.customer || "Guest",
+    initials: getInitials(conversation.customer),
+    message: conversation.firstMessage || "No message yet",
+    time: conversation.startedAt,
+    status: conversation.status || "pending",
+  }));
 
   return {
     conversations,
     kpi,
     topProducts,
     setupSteps: buildSetupSteps({
-      hasProducts: topProducts.length > 0,
-      hasConversations: conversations.length > 0,
+      onboardingProgress,
+      settings,
+      hasConversations: conversationLogs.length > 0,
     }),
   };
 };
 
-function buildSetupSteps({ hasProducts, hasConversations }) {
-  return [
-    { id: "install", label: "Install the ChatBot app", done: true, href: null },
-    { id: "products", label: "Sync products from your store", done: hasProducts, href: null },
-    { id: "settings", label: "Configure bot settings", done: false, href: "/app/settings" },
-    { id: "widget", label: "Add chat widget to your storefront", done: false, href: "/app/settings" },
-    { id: "test", label: "Test your first conversation", done: hasConversations, href: "/app/chat-logs" },
-  ];
-}
-
-function summarizeConversations(conversations) {
-  const safe = Array.isArray(conversations) ? conversations : [];
-  return {
-    total: safe.length,
-    active: safe.filter((c) => c.status === "active").length,
-    pending: safe.filter((c) => c.status === "pending").length,
-    resolved: safe.filter((c) => c.status === "resolved").length,
-  };
+function getInitials(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return "GU";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
 async function fetchTopProducts(admin, limit) {

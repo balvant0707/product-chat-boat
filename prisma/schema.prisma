@@ -1,23 +1,211 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider          = "mysql"
-  url               = env("DATABASE_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum WidgetPosition {
+  BOTTOM_LEFT
+  BOTTOM_RIGHT
+}
+
+enum LauncherStyle {
+  BUBBLE
+  ICON
+  FULL_BUTTON
+}
+
+enum ThemeMode {
+  LIGHT
+  DARK
+  AUTO
+}
+
+enum TonePreset {
+  FRIENDLY
+  PROFESSIONAL
+  CONCISE
+  CUSTOM
+}
+
+enum AnswerLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
+enum FlowStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ConversationStatus {
+  ACTIVE
+  PENDING
+  RESOLVED
+  CLOSED
+  SPAM
+}
+
+enum ConversationSource {
+  WIDGET
+  ADMIN
+  API
+  WHATSAPP
+  INSTAGRAM
+  EMAIL
+}
+
+enum SenderRole {
+  USER
+  BOT
+  AGENT
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  QUICK_REPLY
+  PRODUCT_CARD
+  COLLECTION_CARD
+  ORDER_STATUS
+  LINK
+  FORM
+  PROMPT
+  SYSTEM
+}
+
+enum HandoffReason {
+  USER_REQUEST
+  SENTIMENT
+  NO_ANSWER
+  WORKING_HOURS
+  RULE
+  UNKNOWN
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum KnowledgeSourceType {
+  STORE_PAGE
+  PRODUCT_CATALOG
+  COLLECTION
+  TAG
+  CUSTOM_QA
+  FILE_UPLOAD
+  URL_IMPORT
+}
+
+enum SyncFrequency {
+  MANUAL
+  DAILY
+  WEEKLY
+}
+
+enum TriggerType {
+  FIRST_VISIT
+  RETURNING_VISITOR
+  EXIT_INTENT
+  TIME_ON_PAGE
+  PAGE_VIEW
+  CART_VALUE
+  ABANDONED_CHECKOUT
+}
+
+enum IntegrationType {
+  WEBHOOK
+  KLAVIYO
+  MAILCHIMP
+  GOOGLE_SHEETS
+  ZAPIER
+  MAKE
+  CUSTOM_CRM
+}
+
+enum EventType {
+  CONVERSATION_CREATED
+  MESSAGE_SENT
+  LEAD_CAPTURED
+  TICKET_CREATED
+  HANDOFF_TRIGGERED
+  WEBHOOK_SENT
+  WEBHOOK_FAILED
+}
+
+enum MetricType {
+  CONVERSATIONS
+  AI_MESSAGES
+  AGENT_MESSAGES
+  LEADS
+}
+
+enum PlanCode {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum AgentStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum AdminRoleType {
+  OWNER
+  STAFF
+  SUPPORT
+  ANALYST
+}
+
+enum BlockListType {
+  IP
+  EMAIL_DOMAIN
+  EMAIL
+  USER_AGENT
+  WORD
+}
+
+enum ConsentType {
+  CHAT_STORAGE
+  MARKETING
+  PRIVACY_POLICY
+  GDPR
+}
+
+enum DeliveryChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  NONE
 }
 
 model Session {
-  id                  String    @id
+  id                  String   @id
   shop                String
   state               String
-  isOnline            Boolean   @default(false)
+  isOnline            Boolean  @default(false)
   scope               String?
   expires             DateTime?
   accessToken         String
@@ -25,21 +213,693 @@ model Session {
   firstName           String?
   lastName            String?
   email               String?
-  accountOwner        Boolean   @default(false)
+  accountOwner        Boolean  @default(false)
   locale              String?
-  collaborator        Boolean?  @default(false)
-  emailVerified       Boolean?  @default(false)
+  collaborator        Boolean? @default(false)
+  emailVerified       Boolean? @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
 
-model shop {
-  id            Int       @id @default(autoincrement())
-  shop          String    @unique(map: "Shop_shop_key")
-  accessToken   String?
-  installed     Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+model Shop {
+  id            Int      @id @default(autoincrement())
+  shop          String   @unique(map: "Shop_shop_key")
+  accessToken   String?  @db.Text
+  installed     Boolean  @default(false)
+  defaultLocale String   @default("en") @db.VarChar(16)
+  timezone      String   @default("UTC") @db.VarChar(64)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
   onboardedAt   DateTime?
   uninstalledAt DateTime?
+
+  onboardingProgress    OnboardingProgress?
+  botSetting            BotSetting?
+  aiSetting             AiSetting?
+  compliancePolicy      CompliancePolicy?
+  flows                 Flow[]
+  knowledgeSources      KnowledgeSource[]
+  knowledgeItems        KnowledgeItem[]
+  knowledgeSyncJobs     KnowledgeSyncJob[]
+  conversations         Conversation[]
+  messages              ConversationMessage[]
+  conversationEvents    ConversationEvent[]
+  leads                 Lead[]
+  tickets               Ticket[]
+  agents                Agent[]
+  assignments           ConversationAssignment[]
+  notes                 ConversationNote[]
+  cannedReplies         CannedReply[]
+  automationRules       AutomationRule[]
+  followupAutomations   FollowupAutomation[]
+  integrationConnections IntegrationConnection[]
+  webhookSubscriptions  WebhookSubscription[]
+  apiAccessTokens       ApiAccessToken[]
+  usageCounters         UsageCounter[]
+  plans                 ShopPlan[]
+  blockListEntries      BlockListEntry[]
+  adminRoles            AdminRole[]
+  consentRecords        ConsentRecord[]
+  locales               ShopLocale[]
+  eventLogs             EventLog[]
+
+  @@map("shop")
+}
+
+model OnboardingProgress {
+  id                     Int      @id @default(autoincrement())
+  shopId                 Int      @unique
+  stepOneInstalled       Boolean  @default(true)
+  stepTwoEmbedEnabled    Boolean  @default(false)
+  stepThreeBrandingDone  Boolean  @default(false)
+  stepFourKnowledgeReady Boolean  @default(false)
+  stepFiveTested         Boolean  @default(false)
+  completedAt            DateTime?
+  updatedAt              DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model BotSetting {
+  id                            Int            @id @default(autoincrement())
+  shopId                        Int            @unique
+  enabled                       Boolean        @default(false)
+  botName                       String         @default("Shop Assistant") @db.VarChar(80)
+  subtitle                      String?        @db.VarChar(160)
+  avatarUrl                     String?        @db.Text
+  logoUrl                       String?        @db.Text
+  welcomeMessage                String         @default("Hi! I am here to help. What can I do for you?") @db.Text
+  offlineMessage                String         @default("Thanks for reaching out. Our team will get back shortly.") @db.Text
+  greetingRules                 Json?
+  timeBasedGreetingEnabled      Boolean        @default(true)
+  primaryColor                  String         @default("#008060") @db.VarChar(16)
+  gradientFrom                  String?        @db.VarChar(16)
+  gradientTo                    String?        @db.VarChar(16)
+  buttonColor                   String?        @db.VarChar(16)
+  hoverColor                    String?        @db.VarChar(16)
+  fontFamily                    String?        @db.VarChar(120)
+  fontScale                     Float          @default(1)
+  widgetPosition                WidgetPosition @default(BOTTOM_RIGHT)
+  launcherStyle                 LauncherStyle  @default(BUBBLE)
+  cornerRadius                  Int            @default(20)
+  shadowLevel                   Int            @default(3)
+  spacingScale                  Float          @default(1)
+  themeMode                     ThemeMode      @default(AUTO)
+  headerTitle                   String?        @db.VarChar(120)
+  headerLogoUrl                 String?        @db.Text
+  showHeaderCloseIcon           Boolean        @default(true)
+  showPoweredBy                 Boolean        @default(true)
+  embedEnabled                  Boolean        @default(false)
+  autoInjectEnabled             Boolean        @default(true)
+  manualSnippetEnabled          Boolean        @default(true)
+  testModeEnabled               Boolean        @default(false)
+  multiStoreEnabled             Boolean        @default(false)
+  rememberChatHistory           Boolean        @default(true)
+  minimizedBubbleAfterClose     Boolean        @default(true)
+  showTypingIndicator           Boolean        @default(true)
+  showMessageTimestamps         Boolean        @default(true)
+  supportRichMessages           Boolean        @default(true)
+  maxProducts                   Int            @default(5)
+  showPrivacyMessage            Boolean        @default(false)
+  privacyMessage                String?        @db.Text
+  consentCheckboxRequired       Boolean        @default(false)
+  consentMessage                String?        @db.Text
+  workingHoursEnabled           Boolean        @default(false)
+  workingHoursTimezone          String         @default("UTC") @db.VarChar(64)
+  proactiveWelcomeEnabled       Boolean        @default(true)
+  proactiveExitIntentEnabled    Boolean        @default(false)
+  proactiveTimeOnPageSec        Int            @default(10)
+  productPagePrompt             String?        @db.Text
+  cartPagePrompt                String?        @db.Text
+  policyPagePrompt              String?        @db.Text
+  cartValueOfferThreshold       Decimal?       @db.Decimal(10, 2)
+  cartValueOfferMessage         String?        @db.Text
+  abandonedCheckoutPromptEnabled Boolean       @default(false)
+  createdAt                     DateTime       @default(now())
+  updatedAt                     DateTime       @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model AiSetting {
+  id                       Int          @id @default(autoincrement())
+  shopId                   Int          @unique
+  enabled                  Boolean      @default(false)
+  hybridModeEnabled        Boolean      @default(true)
+  provider                 String       @default("claude") @db.VarChar(64)
+  model                    String?      @db.VarChar(120)
+  encryptedApiKey          String?      @db.Text
+  tone                     TonePreset   @default(FRIENDLY)
+  answerLength             AnswerLength @default(MEDIUM)
+  systemPrompt             String?      @db.Text
+  safeNoGuessing           Boolean      @default(true)
+  safeShowLinks            Boolean      @default(true)
+  blacklistTopics          Json?
+  confidenceThreshold      Float        @default(0.6)
+  temperature              Float        @default(0.7)
+  fallbackToFlow           Boolean      @default(true)
+  fallbackToAgent          Boolean      @default(false)
+  knowledgeSyncFrequency   SyncFrequency @default(DAILY)
+  knowledgeLastSyncedAt    DateTime?
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model Flow {
+  id                  String      @id @default(cuid())
+  shopId              Int
+  name                String      @db.VarChar(140)
+  description         String?     @db.Text
+  language            String      @default("en") @db.VarChar(16)
+  status              FlowStatus  @default(DRAFT)
+  isDefault           Boolean     @default(false)
+  isWorkingHoursFlow  Boolean     @default(false)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  publishedAt         DateTime?
+
+  shop   Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  nodes  FlowNode[]
+  edges  FlowEdge[]
+  locales ShopLocale[]
+
+  @@index([shopId, status])
+  @@index([shopId, language])
+}
+
+model FlowNode {
+  id        String   @id @default(cuid())
+  flowId    String
+  type      String   @db.VarChar(64)
+  label     String   @db.VarChar(140)
+  config    Json?
+  x         Int      @default(0)
+  y         Int      @default(0)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  flow          Flow       @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  outgoingEdges FlowEdge[] @relation("FlowEdgeFromNode")
+  incomingEdges FlowEdge[] @relation("FlowEdgeToNode")
+
+  @@index([flowId, position])
+}
+
+model FlowEdge {
+  id             String   @id @default(cuid())
+  flowId         String
+  fromNodeId     String
+  toNodeId       String
+  conditionType  String?  @db.VarChar(64)
+  conditionValue String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  flow     Flow     @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  fromNode FlowNode @relation("FlowEdgeFromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode   FlowNode @relation("FlowEdgeToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+  @@index([fromNodeId])
+  @@index([toNodeId])
+}
+
+model KnowledgeSource {
+  id            Int                 @id @default(autoincrement())
+  shopId        Int
+  type          KnowledgeSourceType
+  name          String              @db.VarChar(160)
+  sourceUrl     String?             @db.Text
+  fileKey       String?             @db.VarChar(191)
+  isActive      Boolean             @default(true)
+  syncFrequency SyncFrequency       @default(MANUAL)
+  scheduleCron  String?             @db.VarChar(120)
+  options       Json?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  shop    Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items   KnowledgeItem[]
+  syncJobs KnowledgeSyncJob[]
+
+  @@index([shopId, type])
+  @@index([shopId, isActive])
+}
+
+model KnowledgeItem {
+  id              String   @id @default(cuid())
+  shopId          Int
+  sourceId        Int?
+  locale          String   @default("en") @db.VarChar(16)
+  title           String   @db.VarChar(255)
+  content         String   @db.Text
+  sourceReference String?  @db.Text
+  embeddingKey    String?  @db.VarChar(191)
+  confidence      Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  shop   Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  source KnowledgeSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, locale])
+  @@index([sourceId])
+}
+
+model KnowledgeSyncJob {
+  id            String   @id @default(cuid())
+  shopId        Int
+  sourceId      Int?
+  status        String   @default("queued") @db.VarChar(32)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  resultSummary String?  @db.Text
+  createdAt     DateTime @default(now())
+
+  shop   Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  source KnowledgeSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, status, createdAt])
+}
+
+model Conversation {
+  id                String             @id @default(cuid())
+  shopId            Int
+  externalSessionId String?            @db.VarChar(191)
+  visitorId         String?            @db.VarChar(191)
+  customerName      String?            @db.VarChar(120)
+  customerEmail     String?            @db.VarChar(191)
+  customerPhone     String?            @db.VarChar(40)
+  source            ConversationSource @default(WIDGET)
+  locale            String             @default("en") @db.VarChar(16)
+  sourcePage        String?            @db.Text
+  status            ConversationStatus @default(ACTIVE)
+  startedAt         DateTime           @default(now())
+  lastMessageAt     DateTime?
+  firstResponseAt   DateTime?
+  resolvedAt        DateTime?
+  closedAt          DateTime?
+  handoffRequested  Boolean            @default(false)
+  handoffReason     HandoffReason?
+  sentimentScore    Float?
+  tags              Json?
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  shop          Shop                     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  messages      ConversationMessage[]
+  events        ConversationEvent[]
+  assignments   ConversationAssignment[]
+  notes         ConversationNote[]
+  leads         Lead[]
+  tickets       Ticket[]
+  consentRecords ConsentRecord[]
+  eventLogs     EventLog[]
+
+  @@index([shopId, status, startedAt])
+  @@index([shopId, externalSessionId])
+}
+
+model ConversationMessage {
+  id             String    @id @default(cuid())
+  conversationId String
+  shopId         Int
+  role           SenderRole
+  type           MessageType @default(TEXT)
+  body           String    @db.Text
+  maskedBody     String?   @db.Text
+  payload        Json?
+  aiConfidence   Float?
+  tokenUsage     Int?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([shopId, createdAt])
+}
+
+model ConversationEvent {
+  id             String    @id @default(cuid())
+  conversationId String?
+  shopId         Int
+  type           EventType
+  details        Json?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, type, createdAt])
+  @@index([conversationId])
+}
+
+model Agent {
+  id             Int         @id @default(autoincrement())
+  shopId         Int
+  externalUserId String?     @db.VarChar(191)
+  name           String      @db.VarChar(120)
+  email          String      @db.VarChar(191)
+  status         AgentStatus @default(ACTIVE)
+  isPrimary      Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  shop        Shop                     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  assignments ConversationAssignment[]
+  notes       ConversationNote[]
+  tickets     Ticket[]
+
+  @@unique([shopId, email])
+  @@index([shopId, status])
+}
+
+model ConversationAssignment {
+  id             String        @id @default(cuid())
+  shopId         Int
+  conversationId String
+  agentId        Int
+  reason         HandoffReason?
+  assignedAt     DateTime      @default(now())
+  unassignedAt   DateTime?
+
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agent        Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, assignedAt])
+  @@index([conversationId, unassignedAt])
+  @@index([agentId, assignedAt])
+}
+
+model ConversationNote {
+  id             String   @id @default(cuid())
+  shopId         Int
+  conversationId String
+  agentId        Int
+  body           String   @db.Text
+  createdAt      DateTime @default(now())
+
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agent        Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([shopId, createdAt])
+}
+
+model CannedReply {
+  id        Int      @id @default(autoincrement())
+  shopId    Int
+  title     String   @db.VarChar(120)
+  body      String   @db.Text
+  shortcut  String?  @db.VarChar(40)
+  tags      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, shortcut])
+  @@index([shopId, createdAt])
+}
+
+model Lead {
+  id             String   @id @default(cuid())
+  shopId         Int
+  conversationId String?
+  name           String?  @db.VarChar(120)
+  email          String?  @db.VarChar(191)
+  phone          String?  @db.VarChar(40)
+  tags           Json?
+  customFields   Json?
+  sourcePage     String?  @db.Text
+  sourceCampaign String?  @db.VarChar(120)
+  consentGiven   Boolean  @default(false)
+  consentText    String?  @db.Text
+  exportedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  consentRecords ConsentRecord[]
+
+  @@index([shopId, createdAt])
+  @@index([conversationId])
+}
+
+model Ticket {
+  id             String         @id @default(cuid())
+  shopId         Int
+  conversationId String?
+  referenceCode  String         @unique @db.VarChar(40)
+  subject        String         @db.VarChar(255)
+  description    String?        @db.Text
+  status         TicketStatus   @default(OPEN)
+  priority       TicketPriority @default(MEDIUM)
+  requesterName  String?        @db.VarChar(120)
+  requesterEmail String?        @db.VarChar(191)
+  attachmentUrls Json?
+  assigneeAgentId Int?
+  slaDueAt       DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  assignee     Agent?        @relation(fields: [assigneeAgentId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, status, createdAt])
+  @@index([conversationId])
+}
+
+model AutomationRule {
+  id          Int         @id @default(autoincrement())
+  shopId      Int
+  name        String      @db.VarChar(140)
+  triggerType TriggerType
+  enabled     Boolean     @default(true)
+  priority    Int         @default(10)
+  conditions  Json?
+  actions     Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, triggerType, enabled])
+}
+
+model FollowupAutomation {
+  id           Int             @id @default(autoincrement())
+  shopId       Int
+  name         String          @db.VarChar(140)
+  channel      DeliveryChannel @default(EMAIL)
+  enabled      Boolean         @default(true)
+  delayMinutes Int             @default(0)
+  template     String          @db.Text
+  couponCode   String?         @db.VarChar(80)
+  webhookUrl   String?         @db.Text
+  conditions   Json?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, channel, enabled])
+}
+
+model IntegrationConnection {
+  id              Int             @id @default(autoincrement())
+  shopId          Int
+  type            IntegrationType
+  name            String          @db.VarChar(120)
+  enabled         Boolean         @default(true)
+  webhookUrl      String?         @db.Text
+  secretEncrypted String?         @db.Text
+  apiKeyEncrypted String?         @db.Text
+  config          Json?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, type, enabled])
+}
+
+model WebhookSubscription {
+  id             Int       @id @default(autoincrement())
+  shopId         Int
+  eventType      EventType
+  endpoint       String    @db.Text
+  secretHash     String?   @db.VarChar(191)
+  enabled        Boolean   @default(true)
+  lastDeliveryAt DateTime?
+  lastStatusCode Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, eventType, enabled])
+}
+
+model ApiAccessToken {
+  id         Int      @id @default(autoincrement())
+  shopId     Int
+  label      String   @db.VarChar(120)
+  tokenHash  String   @unique @db.VarChar(191)
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, revokedAt])
+}
+
+model UsageCounter {
+  id             Int        @id @default(autoincrement())
+  shopId         Int
+  metricType     MetricType
+  periodStart    DateTime
+  periodEnd      DateTime
+  usedCount      Int        @default(0)
+  limitCount     Int        @default(0)
+  alert80SentAt  DateTime?
+  alert100SentAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, metricType, periodStart])
+  @@index([shopId, periodEnd])
+}
+
+model ShopPlan {
+  id                     Int          @id @default(autoincrement())
+  shopId                 Int
+  code                   PlanCode     @default(FREE)
+  cycle                  BillingCycle @default(MONTHLY)
+  active                 Boolean      @default(true)
+  conversationsPerMonth  Int          @default(200)
+  aiMessagesPerMonth     Int          @default(500)
+  agentsLimit            Int          @default(1)
+  startedAt              DateTime     @default(now())
+  endsAt                 DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, active])
+}
+
+model CompliancePolicy {
+  id                    Int      @id @default(autoincrement())
+  shopId                Int      @unique
+  dataRetentionDays     Int      @default(365)
+  autoDeleteEnabled     Boolean  @default(false)
+  piiMaskingEnabled     Boolean  @default(true)
+  spamRateLimitPerMinute Int     @default(30)
+  blockAbusiveWords     Boolean  @default(false)
+  abusiveWords          Json?
+  consentRequired       Boolean  @default(false)
+  consentMessage        String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+}
+
+model BlockListEntry {
+  id        Int           @id @default(autoincrement())
+  shopId    Int
+  type      BlockListType
+  value     String        @db.VarChar(191)
+  reason    String?       @db.VarChar(255)
+  expiresAt DateTime?
+  createdAt DateTime      @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, type, value])
+  @@index([shopId, expiresAt])
+}
+
+model AdminRole {
+  id          Int           @id @default(autoincrement())
+  shopId      Int
+  userId      String        @db.VarChar(191)
+  email       String?       @db.VarChar(191)
+  role        AdminRoleType @default(STAFF)
+  permissions Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, userId])
+  @@index([shopId, role])
+}
+
+model ConsentRecord {
+  id             String      @id @default(cuid())
+  shopId         Int
+  conversationId String?
+  leadId         String?
+  type           ConsentType
+  granted        Boolean
+  ipAddress      String?     @db.VarChar(64)
+  userAgent      String?     @db.Text
+  createdAt      DateTime    @default(now())
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  lead         Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, type, createdAt])
+  @@index([conversationId])
+}
+
+model ShopLocale {
+  id         Int      @id @default(autoincrement())
+  shopId     Int
+  localeCode String   @db.VarChar(16)
+  enabled    Boolean  @default(true)
+  isDefault  Boolean  @default(false)
+  flowId     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  shop Shop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  flow Flow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
+
+  @@unique([shopId, localeCode])
+}
+
+model EventLog {
+  id             String   @id @default(cuid())
+  shopId         Int
+  conversationId String?
+  name           String   @db.VarChar(120)
+  payload        Json?
+  createdAt      DateTime @default(now())
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, name, createdAt])
+  @@index([conversationId])
 }

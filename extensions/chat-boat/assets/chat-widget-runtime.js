@@ -15,6 +15,8 @@
     history: loadHistory(config.storageKey),
     products: [],
     resources: [],
+    sessionId: config.sessionId,
+    visitorId: config.visitorId,
   };
 
   const ui = renderBaseUI(config);
@@ -115,6 +117,13 @@
     state.products = [];
     state.resources = [];
     state.unread = 0;
+    state.sessionId = createSessionId(config.sessionKey);
+    config.sessionId = state.sessionId;
+    try {
+      localStorage.setItem(config.sessionKey, state.sessionId);
+    } catch (_error) {
+      // Ignore storage failures.
+    }
     pushMessage(state, config, "bot", config.welcomeMessage, false);
     pushMessage(
       state,
@@ -149,6 +158,7 @@
 
     let botReply = null;
     try {
+      config.sessionId = state.sessionId;
       botReply = await fetchBotReply(config, state.history, text);
     } catch (_error) {
       botReply = await safeFallbackReply(text);
@@ -195,9 +205,14 @@ function buildConfig(root) {
   const color = sanitizeColor(data.color || "#008060");
   const shop = (data.shop || window.location.hostname || "shop").toLowerCase();
   const quickReplies = parseQuickReplies(data.quickReplies);
+  const visitorKey = `pcb-visitor:${shop}`;
+  const sessionKey = `pcb-session:${shop}`;
+  const visitorId = getOrCreateStorageValue(visitorKey, createVisitorId);
+  const sessionId = getOrCreateStorageValue(sessionKey, createSessionId);
 
   return {
     botName: (data.botName || "Shop Assistant").trim(),
+    subtitle: (data.subtitle || "Online now").trim(),
     botInitials: getInitials(data.botName || "Shop Assistant"),
     welcomeMessage: (data.welcome || "Hi! Ask me about products, pricing, or recommendations.").trim(),
     primaryColor: color,
@@ -218,10 +233,19 @@ function buildConfig(root) {
         ? "_blank"
         : "_self",
     sliderLimit: clampNumber(parseInt(data.sliderLimit || "5", 10), 1, 10, 5),
+    showPoweredBy:
+      data.showPoweredBy !== undefined
+        ? parseBoolean(data.showPoweredBy)
+        : true,
+    testMode: parseBoolean(data.testMode),
     shop,
     apiUrl: normalizeApiBaseUrl(data.apiUrl),
     quickReplies: quickReplies.length ? quickReplies : PCB_DEFAULT_QUICK_REPLIES,
     storageKey: `pcb-history:${shop}`,
+    visitorKey,
+    sessionKey,
+    visitorId,
+    sessionId,
   };
 }
 
@@ -267,7 +291,7 @@ function renderBaseUI(config) {
   const headerName = createElement("p", "pcb-header-name");
   headerName.textContent = config.botName;
   const headerStatus = createElement("p", "pcb-header-status");
-  headerStatus.textContent = "Online now";
+  headerStatus.textContent = config.testMode ? "Test mode" : config.subtitle;
   headerText.appendChild(headerName);
   headerText.appendChild(headerStatus);
   headerLeft.appendChild(avatar);
@@ -336,7 +360,11 @@ function renderBaseUI(config) {
   inputRow.appendChild(sendButton);
 
   const footer = createElement("div", "pcb-footer");
-  footer.textContent = "Powered by Chat Boat";
+  if (config.showPoweredBy) {
+    footer.textContent = "Powered by Chat Boat";
+  } else {
+    footer.classList.add("pcb-hidden");
+  }
 
   panel.appendChild(header);
   panel.appendChild(messages);
@@ -540,6 +568,13 @@ async function requestReplyFromApi(config, history, userText) {
     message: userText,
     history: history.slice(-12),
     source: "storefront-widget",
+    sourcePage: window.location.pathname,
+    locale:
+      document.documentElement.getAttribute("lang") ||
+      navigator.language ||
+      "en",
+    sessionId: config.sessionId,
+    visitorId: config.visitorId,
   };
 
   for (const url of endpoints) {
@@ -1270,6 +1305,41 @@ function normalizeApiBaseUrl(url) {
     return "";
   }
   return trimmed.replace(/\/+$/, "");
+}
+
+function getOrCreateStorageValue(key, generator) {
+  try {
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      return existing;
+    }
+    const value = generator(key);
+    localStorage.setItem(key, value);
+    return value;
+  } catch (_error) {
+    return generator(key);
+  }
+}
+
+function createVisitorId(seed) {
+  const random = Math.random().toString(36).slice(2, 10);
+  const source = `${seed || "visitor"}:${Date.now()}:${random}`;
+  return `v_${simpleHash(source)}`;
+}
+
+function createSessionId(seed) {
+  const random = Math.random().toString(36).slice(2, 8);
+  return `s_${simpleHash(`${seed || "session"}:${Date.now()}:${random}`)}`;
+}
+
+function simpleHash(input) {
+  const text = String(input || "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
 }
 
 function createElement(tagName, className, attrs) {

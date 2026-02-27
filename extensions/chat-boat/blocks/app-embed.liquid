@@ -7,6 +7,7 @@
   id="pcb-root"
   class="pcb-{{ block.settings.position }}"
   data-bot-name="{{ block.settings.bot_name | escape }}"
+  data-subtitle="{{ block.settings.bot_subtitle | escape }}"
   data-welcome="{{ block.settings.welcome_message | escape }}"
   data-color="{{ block.settings.primary_color }}"
   data-position="{{ block.settings.position }}"
@@ -19,6 +20,8 @@
   data-slider-limit="{{ block.settings.slider_limit }}"
   data-shop="{{ shop.permanent_domain }}"
   data-api-url="{{ block.settings.app_url | default: '' }}"
+  data-show-powered-by="{{ block.settings.show_powered_by }}"
+  data-test-mode="{{ block.settings.test_mode }}"
   data-quick-replies="{{ block.settings.quick_replies | escape }}"
   {{ block.shopify_attributes }}
 ></div>
@@ -45,6 +48,12 @@
       "id": "welcome_message",
       "label": "Welcome Message",
       "default": "Hi! I am here to help you find the perfect product. What are you looking for today?"
+    },
+    {
+      "type": "text",
+      "id": "bot_subtitle",
+      "label": "Bot Subtitle",
+      "default": "Online now"
     },
     {
       "type": "text",
@@ -96,6 +105,18 @@
       "type": "checkbox",
       "id": "show_on_mobile",
       "label": "Show on mobile devices",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "test_mode",
+      "label": "Enable test mode badge",
+      "default": false
+    },
+    {
+      "type": "checkbox",
+      "id": "show_powered_by",
+      "label": "Show Powered by footer",
       "default": true
     },
     {

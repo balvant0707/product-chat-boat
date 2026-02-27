@@ -1,625 +1,486 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Page,
-  Layout,
-  Card,
-  Text,
-  BlockStack,
-  InlineStack,
-  TextField,
-  Select,
-  Button,
-  Divider,
   Badge,
   Banner,
+  BlockStack,
   Box,
-  RangeSlider,
+  Button,
+  Card,
+  Checkbox,
   ChoiceList,
-  Tooltip,
+  Divider,
+  InlineStack,
+  Layout,
+  Page,
+  RangeSlider,
+  Select,
+  Text,
+  TextField,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
+import { getOrCreateSettings, saveSettings } from "../models/chatbot.server";
 
-export const loader = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
-  return {
-    themeEditorUrl: `https://${session.shop}/admin/themes/current/editor?context=apps`,
-  };
-};
-
-export const action = async ({ request }) => {
-  await authenticate.admin(request);
-  const formData = await request.formData();
-  // TODO: save to BotConfig model in DB
-  return { success: true, savedAt: new Date().toISOString() };
-};
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-const PRESET_COLORS = [
-  { hex: "#008060", label: "Shopify Green" },
-  { hex: "#005bd3", label: "Blue" },
-  { hex: "#bf0711", label: "Red" },
-  { hex: "#e6a817", label: "Gold" },
-  { hex: "#6d1ea1", label: "Purple" },
-  { hex: "#1a1a1a", label: "Black" },
-];
-
-const AI_PROVIDERS = [
-  { label: "Claude Haiku (Anthropic) — Recommended", value: "claude" },
-  { label: "OpenAI (GPT-4o)", value: "openai" },
-];
+const PRESET_COLORS = ["#008060", "#005bd3", "#bf0711", "#e6a817", "#111827"];
 
 const POSITION_OPTIONS = [
   { label: "Bottom Right", value: "bottom-right" },
   { label: "Bottom Left", value: "bottom-left" },
 ];
 
-const DEFAULTS = {
-  botName: "Shop Assistant",
-  welcomeMessage: "Hi! I'm here to help you find the perfect product. What are you looking for today?",
-  offlineMessage: "Thanks for reaching out! Our bot will respond shortly.",
-  primaryColor: "#008060",
-  position: ["bottom-right"],
-  aiProvider: "claude",
-  apiKey: "",
-  maxProducts: 5,
-  temperature: 0.7,
-  isEnabled: false,
-};
+const AI_PROVIDER_OPTIONS = [
+  { label: "Claude (Recommended)", value: "claude" },
+  { label: "OpenAI", value: "openai" },
+];
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-function SectionHeader({ title, subtitle }) {
-  return (
-    <BlockStack gap="100">
-      <Text as="h2" variant="headingMd">{title}</Text>
-      {subtitle && <Text as="p" variant="bodySm" tone="subdued">{subtitle}</Text>}
-    </BlockStack>
-  );
+function normalizeIncomingSettings(raw) {
+  const settings = raw || {};
+  return {
+    botName: String(settings.botName || "Shop Assistant"),
+    subtitle: String(settings.subtitle || "Online now"),
+    welcomeMessage: String(
+      settings.welcomeMessage ||
+        "Hi! I am here to help you with products, shipping, order tracking, and returns.",
+    ),
+    offlineMessage: String(
+      settings.offlineMessage ||
+        "Thanks for reaching out. Our support team will reply as soon as possible.",
+    ),
+    primaryColor: String(settings.primaryColor || "#008060"),
+    position: String(settings.position || "bottom-right"),
+    aiProvider: String(settings.aiProvider || "claude"),
+    apiKey: "",
+    maxProducts: Number(settings.maxProducts || 5),
+    temperature: Number(settings.temperature || 0.7),
+    aiConfidenceThreshold: Number(settings.aiConfidenceThreshold || 0.6),
+    isEnabled: Boolean(settings.isEnabled),
+    testModeEnabled: Boolean(settings.testModeEnabled),
+    showPoweredBy: Boolean(settings.showPoweredBy),
+    aiEnabled: Boolean(settings.aiEnabled ?? true),
+    hasApiKey: Boolean(settings.hasApiKey),
+  };
 }
 
-function ColorSwatch({ hex, label, selected, onSelect }) {
-  return (
-    <Tooltip content={label}>
-      <Box
-        as="button"
-        onClick={() => onSelect(hex)}
-        width="32px"
-        minHeight="32px"
-        borderRadius="full"
-        borderWidth={selected ? "050" : "025"}
-        borderColor={selected ? "border-focus" : "border"}
-        style={{
-          background: hex,
-          cursor: "pointer",
-          outline: selected ? `3px solid ${hex}55` : "none",
-          outlineOffset: "2px",
-          transition: "outline 0.15s ease",
-        }}
-        aria-label={label}
-        aria-pressed={selected}
-      />
-    </Tooltip>
-  );
+function mapForPersistence(form) {
+  return {
+    botName: form.botName,
+    subtitle: form.subtitle,
+    welcomeMessage: form.welcomeMessage,
+    offlineMessage: form.offlineMessage,
+    primaryColor: form.primaryColor,
+    position: form.position,
+    aiProvider: form.aiProvider,
+    apiKey: form.apiKey,
+    maxProducts: form.maxProducts,
+    temperature: form.temperature,
+    aiConfidenceThreshold: form.aiConfidenceThreshold,
+    isEnabled: form.isEnabled,
+    testModeEnabled: form.testModeEnabled,
+    showPoweredBy: form.showPoweredBy,
+    aiEnabled: form.aiEnabled,
+  };
 }
 
-// ─── Live Widget Preview ───────────────────────────────────────────────────────
-function WidgetPreview({ botName, welcomeMessage, primaryColor, position }) {
-  const short = welcomeMessage.length > 65
-    ? welcomeMessage.slice(0, 65) + "…"
-    : welcomeMessage;
-
+function WidgetPreview({ form }) {
   return (
     <BlockStack gap="200">
       <Text as="p" variant="bodySm" tone="subdued">
-        Live preview · updates as you type
+        Storefront preview
       </Text>
-      <Box
-        borderRadius="300"
-        borderWidth="025"
-        borderColor="border"
-        background="bg-surface"
-        overflow="hidden"
-      >
-        {/* Header */}
-        <Box padding="300" style={{ background: primaryColor }}>
+      <Box borderWidth="025" borderColor="border" borderRadius="300" overflow="hidden">
+        <Box
+          padding="300"
+          style={{
+            background: `linear-gradient(135deg, ${form.primaryColor}, ${form.primaryColor}CC)`,
+          }}
+        >
           <InlineStack align="space-between" blockAlign="center">
-            <InlineStack gap="200" blockAlign="center">
-              <Box
-                width="28px"
-                minHeight="28px"
-                background="bg-surface"
-                borderRadius="full"
-                style={{ opacity: 0.3 }}
-              />
-              <Text as="p" variant="bodyMd" fontWeight="semibold" tone="text-inverse">
-                {botName || "Shop Assistant"}
+            <BlockStack gap="050">
+              <Text as="p" variant="headingSm" tone="text-inverse">
+                {form.botName}
               </Text>
-            </InlineStack>
-            <Text as="span" tone="text-inverse" variant="bodySm">✕</Text>
+              <Text as="p" variant="bodySm" tone="text-inverse">
+                {form.subtitle}
+              </Text>
+            </BlockStack>
+            <Badge tone={form.isEnabled ? "success" : "attention"}>
+              {form.isEnabled ? "Active" : "Inactive"}
+            </Badge>
           </InlineStack>
         </Box>
-
-        {/* Messages area */}
-        <Box padding="300" background="bg-surface-secondary" minHeight="130px">
+        <Box padding="300" background="bg-surface-secondary">
           <BlockStack gap="200">
-            {/* Bot bubble */}
-            <InlineStack align="start" gap="150">
-              <Box
-                width="24px"
-                minHeight="24px"
-                borderRadius="full"
-                style={{ background: primaryColor, flexShrink: 0 }}
-              />
-              <Box
-                padding="200"
-                background="bg-surface"
-                borderRadius="200"
-                maxWidth="80%"
-              >
-                <Text as="p" variant="bodySm">{short}</Text>
-              </Box>
-            </InlineStack>
-
-            {/* User bubble */}
+            <Box background="bg-surface" borderRadius="200" padding="200" maxWidth="80%">
+              <Text as="p" variant="bodySm">
+                {form.welcomeMessage}
+              </Text>
+            </Box>
             <InlineStack align="end">
               <Box
-                padding="200"
                 borderRadius="200"
-                maxWidth="70%"
-                style={{ background: primaryColor }}
+                padding="200"
+                maxWidth="75%"
+                style={{ background: form.primaryColor }}
               >
                 <Text as="p" variant="bodySm" tone="text-inverse">
-                  Show me running shoes
+                  Track my order
                 </Text>
-              </Box>
-            </InlineStack>
-
-            {/* Bot reply */}
-            <InlineStack align="start" gap="150">
-              <Box
-                width="24px"
-                minHeight="24px"
-                borderRadius="full"
-                style={{ background: primaryColor, flexShrink: 0 }}
-              />
-              <Box
-                padding="200"
-                background="bg-surface"
-                borderRadius="200"
-                maxWidth="80%"
-              >
-                <Text as="p" variant="bodySm">Here are 5 running shoes I found…</Text>
               </Box>
             </InlineStack>
           </BlockStack>
         </Box>
-
-        {/* Input */}
-        <Box
-          padding="200"
-          borderBlockStartWidth="025"
-          borderColor="border"
-          background="bg-surface"
-        >
-          <InlineStack gap="150" blockAlign="center">
-            <Box
-              borderRadius="200"
-              borderWidth="025"
-              borderColor="border"
-              padding="150"
-              minWidth="0"
-              width="100%"
-            >
-              <Text as="p" variant="bodySm" tone="subdued">Type a message…</Text>
-            </Box>
-            <Box
-              padding="150"
-              borderRadius="200"
-              style={{ background: primaryColor, flexShrink: 0 }}
-            >
-              <Text as="span" tone="text-inverse" variant="bodySm">→</Text>
-            </Box>
-          </InlineStack>
-        </Box>
       </Box>
-
-      {/* Position indicator */}
-      <Text as="p" variant="bodySm" tone="subdued" alignment="center">
-        Widget shown at {position[0] === "bottom-right" ? "bottom right" : "bottom left"}
-      </Text>
     </BlockStack>
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+export const loader = async ({ request }) => {
+  const { session } = await authenticate.admin(request);
+  const settings = await getOrCreateSettings(session.shop);
+  return {
+    settings,
+    themeEditorUrl: `https://${session.shop}/admin/themes/current/editor?context=apps`,
+  };
+};
+
+export const action = async ({ request }) => {
+  const { session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const payload = Object.fromEntries(formData.entries());
+  const settings = await saveSettings(session.shop, payload);
+
+  return {
+    success: true,
+    savedAt: new Date().toISOString(),
+    settings,
+  };
+};
+
 export default function Settings() {
-  const fetcher = useFetcher();
-  const { themeEditorUrl } = useLoaderData();
   const shopify = useAppBridge();
+  const fetcher = useFetcher();
+  const { settings, themeEditorUrl } = useLoaderData();
 
-  // ── Form state ────────────────────────────────────────
-  const [botName, setBotName] = useState(DEFAULTS.botName);
-  const [welcomeMessage, setWelcomeMessage] = useState(DEFAULTS.welcomeMessage);
-  const [offlineMessage, setOfflineMessage] = useState(DEFAULTS.offlineMessage);
-  const [primaryColor, setPrimaryColor] = useState(DEFAULTS.primaryColor);
-  const [position, setPosition] = useState(DEFAULTS.position);
-  const [aiProvider, setAiProvider] = useState(DEFAULTS.aiProvider);
-  const [apiKey, setApiKey] = useState(DEFAULTS.apiKey);
-  const [maxProducts, setMaxProducts] = useState(DEFAULTS.maxProducts);
-  const [temperature, setTemperature] = useState(DEFAULTS.temperature);
-  const [isEnabled, setIsEnabled] = useState(DEFAULTS.isEnabled);
+  const initial = useMemo(() => normalizeIncomingSettings(settings), [settings]);
+  const [savedForm, setSavedForm] = useState(initial);
+  const [form, setForm] = useState(initial);
 
-  const isSaving = ["loading", "submitting"].includes(fetcher.state);
+  const isSaving = fetcher.state !== "idle";
 
-  // ── Show toast when save completes ────────────────────
   useEffect(() => {
-    if (fetcher.data?.success) {
-      shopify.toast.show("Settings saved successfully");
-    }
+    setSavedForm(initial);
+    setForm(initial);
+  }, [initial]);
+
+  useEffect(() => {
+    if (!fetcher.data?.success) return;
+    const next = normalizeIncomingSettings(fetcher.data.settings);
+    setSavedForm(next);
+    setForm(next);
+    shopify.toast.show("Settings saved");
   }, [fetcher.data, shopify]);
 
-  // ── Unsaved changes detection ──────────────────────────
-  const hasChanges = useMemo(
-    () =>
-      botName !== DEFAULTS.botName ||
-      welcomeMessage !== DEFAULTS.welcomeMessage ||
-      offlineMessage !== DEFAULTS.offlineMessage ||
-      primaryColor !== DEFAULTS.primaryColor ||
-      position[0] !== DEFAULTS.position[0] ||
-      aiProvider !== DEFAULTS.aiProvider ||
-      apiKey !== DEFAULTS.apiKey ||
-      maxProducts !== DEFAULTS.maxProducts ||
-      temperature !== DEFAULTS.temperature ||
-      isEnabled !== DEFAULTS.isEnabled,
-    [botName, welcomeMessage, offlineMessage, primaryColor, position, aiProvider, apiKey, maxProducts, temperature, isEnabled],
-  );
+  const hasChanges = useMemo(() => {
+    const left = mapForPersistence(form);
+    const right = mapForPersistence(savedForm);
+    return JSON.stringify(left) !== JSON.stringify(right);
+  }, [form, savedForm]);
 
-  // ── API key validation ─────────────────────────────────
   const apiKeyError = useMemo(() => {
-    if (!apiKey) return null;
-    if (aiProvider === "claude" && !apiKey.startsWith("sk-ant-")) {
-      return "Claude API keys start with sk-ant-";
+    if (!form.apiKey) return null;
+    if (form.aiProvider === "claude" && !form.apiKey.startsWith("sk-ant-")) {
+      return "Claude keys must start with sk-ant-";
     }
-    if (aiProvider === "openai" && !apiKey.startsWith("sk-")) {
-      return "OpenAI API keys start with sk-";
+    if (form.aiProvider === "openai" && !form.apiKey.startsWith("sk-")) {
+      return "OpenAI keys must start with sk-";
     }
     return null;
-  }, [apiKey, aiProvider]);
+  }, [form.aiProvider, form.apiKey]);
 
-  // ── Handlers ──────────────────────────────────────────
+  const updateField = useCallback((key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
   const handleSave = useCallback(() => {
-    const form = new FormData();
-    form.append("botName", botName);
-    form.append("welcomeMessage", welcomeMessage);
-    form.append("offlineMessage", offlineMessage);
-    form.append("primaryColor", primaryColor);
-    form.append("position", position[0]);
-    form.append("aiProvider", aiProvider);
-    form.append("apiKey", apiKey);
-    form.append("maxProducts", String(maxProducts));
-    form.append("temperature", String(temperature));
-    form.append("isEnabled", String(isEnabled));
-    fetcher.submit(form, { method: "POST" });
-  }, [botName, welcomeMessage, offlineMessage, primaryColor, position, aiProvider, apiKey, maxProducts, temperature, isEnabled, fetcher]);
+    if (apiKeyError) return;
+    const payload = mapForPersistence(form);
+    const formData = new FormData();
+    Object.entries(payload).forEach(([key, value]) => {
+      formData.append(key, String(value));
+    });
+    fetcher.submit(formData, { method: "POST" });
+  }, [apiKeyError, fetcher, form]);
 
   const handleReset = useCallback(() => {
-    setBotName(DEFAULTS.botName);
-    setWelcomeMessage(DEFAULTS.welcomeMessage);
-    setOfflineMessage(DEFAULTS.offlineMessage);
-    setPrimaryColor(DEFAULTS.primaryColor);
-    setPosition(DEFAULTS.position);
-    setAiProvider(DEFAULTS.aiProvider);
-    setApiKey(DEFAULTS.apiKey);
-    setMaxProducts(DEFAULTS.maxProducts);
-    setTemperature(DEFAULTS.temperature);
-    setIsEnabled(DEFAULTS.isEnabled);
-    shopify.toast.show("Settings reset to defaults");
-  }, [shopify]);
-
-  const handleToggle = useCallback(() => {
-    const next = !isEnabled;
-    setIsEnabled(next);
-    shopify.toast.show(next ? "ChatBot activated" : "ChatBot deactivated");
-  }, [isEnabled, shopify]);
+    setForm(savedForm);
+  }, [savedForm]);
 
   return (
     <Page>
       <TitleBar title="ChatBot Settings">
-        <button onClick={handleSave} loading={isSaving} disabled={!hasChanges}>
-          Save Settings
+        <button onClick={handleSave} disabled={!hasChanges || !!apiKeyError || isSaving}>
+          Save
         </button>
-        <button variant="primary" onClick={handleToggle}>
-          {isEnabled ? "Deactivate Bot" : "Activate Bot"}
+        <button
+          onClick={() => updateField("isEnabled", !form.isEnabled)}
+          variant={form.isEnabled ? undefined : "primary"}
+        >
+          {form.isEnabled ? "Disable Bot" : "Enable Bot"}
         </button>
       </TitleBar>
 
-      <BlockStack gap="600">
-        {/* ── Status Banner ─────────────────────────────── */}
+      <BlockStack gap="500">
         <Banner
-          tone={isEnabled ? "success" : "warning"}
-          title={isEnabled ? "ChatBot is active on your storefront" : "ChatBot is currently inactive"}
+          tone={form.isEnabled ? "success" : "warning"}
+          title={
+            form.isEnabled ? "Storefront widget is enabled" : "Storefront widget is disabled"
+          }
         >
           <Text as="p" variant="bodyMd">
-            {isEnabled
-              ? "Customers can chat with your bot. Monitor activity in Chat Logs."
-              : "Click Activate Bot to enable the chat widget on your storefront."}
+            Use test mode to preview behavior before publishing changes.
           </Text>
         </Banner>
 
-        {/* ── Unsaved changes warning ─────────────────── */}
-        {hasChanges && (
-          <Banner tone="info" title="You have unsaved changes">
-            <InlineStack gap="200">
-              <Button onClick={handleSave} loading={isSaving}>Save now</Button>
-              <Button variant="plain" onClick={handleReset}>Reset to defaults</Button>
-            </InlineStack>
-          </Banner>
-        )}
-
         <Card>
           <BlockStack gap="300">
-            <SectionHeader
-              title="Storefront Widget Controls"
-              subtitle="Frontend behavior options are managed in Shopify Admin app embed settings."
-            />
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="h2" variant="headingMd">
+                Setup and Installation
+              </Text>
+              <Button url={themeEditorUrl}>Open Theme App Embed</Button>
+            </InlineStack>
             <Divider />
-            <Text as="p" variant="bodyMd" tone="subdued">
-              Configure product slider visibility, compare-at price display, click behavior, quick replies, and widget placement from the app embed controls.
-            </Text>
-            <InlineStack align="start">
-              <Button url={themeEditorUrl} variant="primary">
-                Open App Embed Settings
-              </Button>
+            <InlineStack gap="400">
+              <Checkbox
+                label="Enable test mode"
+                checked={form.testModeEnabled}
+                onChange={(value) => updateField("testModeEnabled", value)}
+              />
+              <Checkbox
+                label="Show Powered by"
+                checked={form.showPoweredBy}
+                onChange={(value) => updateField("showPoweredBy", value)}
+              />
+              <Checkbox
+                label="Enable AI mode"
+                checked={form.aiEnabled}
+                onChange={(value) => updateField("aiEnabled", value)}
+              />
             </InlineStack>
           </BlockStack>
         </Card>
 
         <Layout>
-          {/* ── Left Column ───────────────────────────── */}
           <Layout.Section>
-            <BlockStack gap="500">
-              {/* General */}
+            <BlockStack gap="400">
               <Card>
-                <BlockStack gap="400">
-                  <SectionHeader
-                    title="General Settings"
-                    subtitle="Customize your chatbot's name and messages."
-                  />
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">
+                    Branding and Widget UI
+                  </Text>
                   <Divider />
                   <TextField
                     label="Bot Name"
-                    value={botName}
-                    onChange={setBotName}
-                    helpText="Shown in the chat widget header."
-                    maxLength={40}
-                    showCharacterCount
+                    value={form.botName}
+                    onChange={(value) => updateField("botName", value)}
                     autoComplete="off"
+                    maxLength={80}
+                    showCharacterCount
+                  />
+                  <TextField
+                    label="Subtitle"
+                    value={form.subtitle}
+                    onChange={(value) => updateField("subtitle", value)}
+                    autoComplete="off"
+                    maxLength={160}
+                    showCharacterCount
                   />
                   <TextField
                     label="Welcome Message"
-                    value={welcomeMessage}
-                    onChange={setWelcomeMessage}
+                    value={form.welcomeMessage}
+                    onChange={(value) => updateField("welcomeMessage", value)}
                     multiline={3}
-                    helpText="Shown when a customer first opens the chat."
-                    maxLength={160}
-                    showCharacterCount
                     autoComplete="off"
+                    maxLength={500}
+                    showCharacterCount
                   />
                   <TextField
-                    label="Fallback / Offline Message"
-                    value={offlineMessage}
-                    onChange={setOfflineMessage}
+                    label="Offline Message"
+                    value={form.offlineMessage}
+                    onChange={(value) => updateField("offlineMessage", value)}
                     multiline={2}
-                    helpText="Shown when the AI cannot answer a question."
-                    maxLength={120}
-                    showCharacterCount
                     autoComplete="off"
+                    maxLength={500}
+                    showCharacterCount
                   />
-                </BlockStack>
-              </Card>
-
-              {/* Appearance */}
-              <Card>
-                <BlockStack gap="400">
-                  <SectionHeader
-                    title="Appearance"
-                    subtitle="Match the chat widget to your brand."
-                  />
-                  <Divider />
                   <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd">Primary Color</Text>
-                    <InlineStack gap="200" wrap={false}>
-                      {PRESET_COLORS.map(({ hex, label }) => (
-                        <ColorSwatch
+                    <Text as="p" variant="bodySm">
+                      Primary Color
+                    </Text>
+                    <InlineStack gap="200">
+                      {PRESET_COLORS.map((hex) => (
+                        <Box
+                          as="button"
                           key={hex}
-                          hex={hex}
-                          label={label}
-                          selected={primaryColor === hex}
-                          onSelect={setPrimaryColor}
+                          onClick={() => updateField("primaryColor", hex)}
+                          width="28px"
+                          minHeight="28px"
+                          borderRadius="full"
+                          borderWidth={form.primaryColor === hex ? "050" : "025"}
+                          borderColor={
+                            form.primaryColor === hex ? "border-focus" : "border-secondary"
+                          }
+                          style={{ background: hex, cursor: "pointer" }}
+                          aria-label={hex}
                         />
                       ))}
                     </InlineStack>
                     <TextField
-                      label="Custom hex color"
-                      labelHidden
-                      value={primaryColor}
-                      onChange={setPrimaryColor}
-                      prefix="#"
-                      placeholder="008060"
-                      maxLength={7}
+                      label="Custom color"
+                      value={form.primaryColor}
+                      onChange={(value) => updateField("primaryColor", value)}
                       autoComplete="off"
-                      connectedRight={
-                        <Box
-                          width="36px"
-                          minHeight="36px"
-                          borderRadius="100"
-                          style={{ background: primaryColor }}
-                        />
-                      }
                     />
                   </BlockStack>
                   <ChoiceList
                     title="Widget Position"
                     choices={POSITION_OPTIONS}
-                    selected={position}
-                    onChange={setPosition}
+                    selected={[form.position]}
+                    onChange={(selected) =>
+                      updateField("position", selected[0] || "bottom-right")
+                    }
                   />
                 </BlockStack>
               </Card>
 
-              {/* AI Config */}
               <Card>
-                <BlockStack gap="400">
-                  <SectionHeader
-                    title="AI Configuration"
-                    subtitle="Connect your AI provider to power responses."
-                  />
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingMd">
+                    AI and Knowledge Controls
+                  </Text>
                   <Divider />
                   <Select
                     label="AI Provider"
-                    options={AI_PROVIDERS}
-                    value={aiProvider}
-                    onChange={(v) => { setAiProvider(v); setApiKey(""); }}
-                    helpText="Claude Haiku is fast and cost-effective for product Q&A."
+                    options={AI_PROVIDER_OPTIONS}
+                    value={form.aiProvider}
+                    onChange={(value) => updateField("aiProvider", value)}
                   />
                   <TextField
                     label="API Key"
-                    value={apiKey}
-                    onChange={setApiKey}
+                    value={form.apiKey}
+                    onChange={(value) => updateField("apiKey", value)}
                     type="password"
+                    autoComplete="off"
                     error={apiKeyError}
                     helpText={
-                      aiProvider === "claude"
-                        ? "Get your key from console.anthropic.com"
-                        : "Get your key from platform.openai.com"
-                    }
-                    placeholder={aiProvider === "claude" ? "sk-ant-…" : "sk-…"}
-                    autoComplete="off"
-                    connectedRight={
-                      apiKey && !apiKeyError ? (
-                        <Badge tone="success">Valid format</Badge>
-                      ) : null
+                      form.hasApiKey && !form.apiKey
+                        ? "A key is already saved. Enter a new one only if you want to replace it."
+                        : "Stored per shop in database."
                     }
                   />
-                  <BlockStack gap="150">
+                  <BlockStack gap="100">
                     <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">Max Products to Recommend</Text>
-                      <Badge>{maxProducts}</Badge>
+                      <Text as="p" variant="bodySm">
+                        Max Products in Suggestions
+                      </Text>
+                      <Badge>{form.maxProducts}</Badge>
                     </InlineStack>
                     <RangeSlider
-                      min={1} max={10} value={maxProducts} onChange={setMaxProducts} output
+                      min={1}
+                      max={10}
+                      value={form.maxProducts}
+                      onChange={(value) => updateField("maxProducts", value)}
                     />
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Products suggested per message (3–5 recommended).
-                    </Text>
                   </BlockStack>
-                  <BlockStack gap="150">
+                  <BlockStack gap="100">
                     <InlineStack align="space-between">
-                      <Text as="p" variant="bodyMd">Response Creativity</Text>
-                      <Badge>
-                        {temperature <= 0.3 ? "Precise" : temperature <= 0.6 ? "Balanced" : "Creative"}
-                        {" · "}{temperature}
-                      </Badge>
+                      <Text as="p" variant="bodySm">
+                        AI Temperature
+                      </Text>
+                      <Badge>{form.temperature.toFixed(1)}</Badge>
                     </InlineStack>
                     <RangeSlider
-                      min={0} max={1} step={0.1} value={temperature} onChange={setTemperature} output
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={form.temperature}
+                      onChange={(value) => updateField("temperature", value)}
                     />
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Lower = focused product answers. Higher = conversational.
-                    </Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodySm">
+                        AI Confidence Threshold
+                      </Text>
+                      <Badge>{form.aiConfidenceThreshold.toFixed(1)}</Badge>
+                    </InlineStack>
+                    <RangeSlider
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={form.aiConfidenceThreshold}
+                      onChange={(value) => updateField("aiConfidenceThreshold", value)}
+                    />
                   </BlockStack>
                 </BlockStack>
               </Card>
             </BlockStack>
           </Layout.Section>
 
-          {/* ── Right Column ──────────────────────────── */}
           <Layout.Section variant="oneThird">
             <BlockStack gap="400">
-              {/* Bot Status Card */}
-              <Card>
-                <BlockStack gap="400">
-                  <SectionHeader title="Bot Status" />
-                  <Divider />
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="p" variant="bodyMd">Status</Text>
-                    <Badge tone={isEnabled ? "success" : "attention"}>
-                      {isEnabled ? "Active" : "Inactive"}
-                    </Badge>
-                  </InlineStack>
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="p" variant="bodyMd">AI Provider</Text>
-                    <Badge>{aiProvider === "claude" ? "Claude" : "OpenAI"}</Badge>
-                  </InlineStack>
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="p" variant="bodyMd">API Key</Text>
-                    <Badge tone={apiKey && !apiKeyError ? "success" : "attention"}>
-                      {apiKey && !apiKeyError ? "Configured" : "Not set"}
-                    </Badge>
-                  </InlineStack>
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="p" variant="bodyMd">Max products</Text>
-                    <Badge>{maxProducts}</Badge>
-                  </InlineStack>
-                  <Divider />
-                  <Button
-                    fullWidth
-                    tone={isEnabled ? "critical" : undefined}
-                    variant={isEnabled ? "secondary" : "primary"}
-                    onClick={handleToggle}
-                  >
-                    {isEnabled ? "Deactivate ChatBot" : "Activate ChatBot"}
-                  </Button>
-                </BlockStack>
-              </Card>
-
-              {/* Live Preview — fully reactive to form state */}
-              <Card>
-                <BlockStack gap="400">
-                  <SectionHeader
-                    title="Widget Preview"
-                    subtitle="Updates as you edit."
-                  />
-                  <Divider />
-                  <WidgetPreview
-                    botName={botName}
-                    welcomeMessage={welcomeMessage}
-                    primaryColor={primaryColor}
-                    position={position}
-                  />
-                </BlockStack>
-              </Card>
-
-              {/* Tips */}
               <Card>
                 <BlockStack gap="300">
-                  <SectionHeader title="Tips" />
+                  <Text as="h2" variant="headingMd">
+                    Status
+                  </Text>
                   <Divider />
-                  <BlockStack gap="200">
-                    {[
-                      "Use a color that matches your store brand.",
-                      "Keep the welcome message short and inviting (under 100 chars).",
-                      "Claude Haiku is the fastest option for real-time chat.",
-                      "Set Max Products to 3–5 for the best customer experience.",
-                      "Temperature 0.4–0.6 gives balanced, helpful answers.",
-                    ].map((tip) => (
-                      <InlineStack key={tip} gap="150" blockAlign="start" wrap={false}>
-                        <Text as="span" variant="bodySm" tone="success">•</Text>
-                        <Text as="p" variant="bodySm" tone="subdued">{tip}</Text>
-                      </InlineStack>
-                    ))}
-                  </BlockStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm">
+                      Bot
+                    </Text>
+                    <Badge tone={form.isEnabled ? "success" : "attention"}>
+                      {form.isEnabled ? "Enabled" : "Disabled"}
+                    </Badge>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm">
+                      Test Mode
+                    </Text>
+                    <Badge tone={form.testModeEnabled ? "success" : "info"}>
+                      {form.testModeEnabled ? "On" : "Off"}
+                    </Badge>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm">
+                      AI
+                    </Text>
+                    <Badge tone={form.aiEnabled ? "success" : "attention"}>
+                      {form.aiEnabled ? "On" : "Off"}
+                    </Badge>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm">
+                      API Key
+                    </Text>
+                    <Badge tone={form.hasApiKey || form.apiKey ? "success" : "attention"}>
+                      {form.hasApiKey || form.apiKey ? "Configured" : "Missing"}
+                    </Badge>
+                  </InlineStack>
                 </BlockStack>
+              </Card>
+
+              <Card>
+                <WidgetPreview form={form} />
               </Card>
             </BlockStack>
           </Layout.Section>
         </Layout>
 
-        {/* ── Footer Save Row ────────────────────────────── */}
         <InlineStack align="end" gap="300">
           <Button onClick={handleReset} disabled={!hasChanges}>
-            Reset to Defaults
+            Reset
           </Button>
           <Button
             variant="primary"

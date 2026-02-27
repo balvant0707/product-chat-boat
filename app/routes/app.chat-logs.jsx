@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import {
   Page,
-  Layout,
   InlineGrid,
   Card,
   Text,
@@ -24,6 +23,7 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
+import { listConversations } from "../models/chatbot.server";
 
 const PAGE_SIZE = 10;
 const STATUS_TONE = { resolved: "success", pending: "attention", active: "info" };
@@ -36,10 +36,10 @@ const STATUS_TABS = [
 ];
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
 
   return {
-    conversations: [],
+    conversations: await listConversations(session.shop, { take: 200 }),
   };
 };
 
