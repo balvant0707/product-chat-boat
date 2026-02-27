@@ -16,172 +16,131 @@ import {
   Tabs,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
+import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
-  return null;
+  const { admin } = await authenticate.admin(request);
+
+  const products = await fetchTopProducts(admin, 12);
+  const conversations = [];
+
+  return { products, conversations };
 };
 
-// ─── Dataset per date range ───────────────────────────────────────────────────
-const RANGE_DATA = {
-  "7d": {
-    kpi: { sessions: 342, messages: 2180, avgLength: "2m 48s", conversion: "5.8%", convTrend: "0.6%", convUp: false },
-    bars: [
-      { label: "Mon", value: 42 }, { label: "Tue", value: 67 },
-      { label: "Wed", value: 53 }, { label: "Thu", value: 88 },
-      { label: "Fri", value: 95 }, { label: "Sat", value: 74 },
-      { label: "Sun", value: 38 },
-    ],
-    peakDay: "Friday (95 chats)", total: 457, avg: 65.3,
-    queries: [
-      { label: "Show me running shoes", value: 48 },
-      { label: "What's on sale?", value: 41 },
-      { label: "Best wireless headphones", value: 33 },
-      { label: "Return policy", value: 28 },
-      { label: "Track my order", value: 22 },
-    ],
-    satisfaction: [
-      { label: "Helpful", value: 71, tone: "success" },
-      { label: "Neutral", value: 20, tone: "attention" },
-      { label: "Not helpful", value: 9, tone: "critical" },
-    ],
-    channels: [
-      { label: "Product pages", value: 61 },
-      { label: "Home page", value: 20 },
-      { label: "Collections", value: 11 },
-      { label: "Cart page", value: 8 },
-    ],
-    products: [
-      { name: "Nike Air Max 270", recs: 12, revenue: "$1,440", trend: "↑ 14%", trendUp: true },
-      { name: "Wireless Earbuds Pro", recs: 9, revenue: "$719.91", trend: "↑ 9%", trendUp: true },
-      { name: "Classic Denim Jacket", recs: 7, revenue: "$623.00", trend: "↓ 2%", trendUp: false },
-      { name: "Running Shorts", recs: 6, revenue: "$210.00", trend: "↑ 3%", trendUp: true },
-      { name: "Yoga Mat Premium", recs: 5, revenue: "$225.00", trend: "↑ 22%", trendUp: true },
-    ],
-  },
-  "30d": {
-    kpi: { sessions: 1284, messages: 8942, avgLength: "3m 12s", conversion: "6.4%", convTrend: "1.2%", convUp: false },
-    bars: [
-      { label: "W1", value: 280 }, { label: "W2", value: 340 },
-      { label: "W3", value: 390 }, { label: "W4", value: 457 },
-    ],
-    peakDay: "Week 4 (457 chats)", total: 1467, avg: 336.8,
-    queries: [
-      { label: "Show me running shoes", value: 148 },
-      { label: "What's on sale?", value: 134 },
-      { label: "Best wireless headphones", value: 112 },
-      { label: "Return policy", value: 98 },
-      { label: "Track my order", value: 76 },
-      { label: "Gift ideas under $50", value: 63 },
-      { label: "Summer collection", value: 55 },
-    ],
-    satisfaction: [
-      { label: "Helpful", value: 74, tone: "success" },
-      { label: "Neutral", value: 18, tone: "attention" },
-      { label: "Not helpful", value: 8, tone: "critical" },
-    ],
-    channels: [
-      { label: "Product pages", value: 58 },
-      { label: "Home page", value: 22 },
-      { label: "Collections", value: 12 },
-      { label: "Cart page", value: 8 },
-    ],
-    products: [
-      { name: "Nike Air Max 270", recs: 34, revenue: "$4,080", trend: "↑ 12%", trendUp: true },
-      { name: "Wireless Earbuds Pro", recs: 28, revenue: "$2,239.72", trend: "↑ 8%", trendUp: true },
-      { name: "Classic Denim Jacket", recs: 22, revenue: "$1,958", trend: "↓ 3%", trendUp: false },
-      { name: "Running Shorts", recs: 19, revenue: "$665", trend: "↑ 5%", trendUp: true },
-      { name: "Yoga Mat Premium", recs: 15, revenue: "$675", trend: "↑ 20%", trendUp: true },
-      { name: "Blue Hoodie", recs: 13, revenue: "$845", trend: "↑ 2%", trendUp: true },
-      { name: "Canvas Sneakers", recs: 11, revenue: "$484", trend: "↓ 7%", trendUp: false },
-    ],
-  },
-  "90d": {
-    kpi: { sessions: 3890, messages: 27400, avgLength: "3m 31s", conversion: "7.1%", convTrend: "0.9%", convUp: true },
-    bars: [
-      { label: "Jan", value: 1100 }, { label: "Feb", value: 1280 },
-      { label: "Mar", value: 1510 },
-    ],
-    peakDay: "March (1,510 chats)", total: 3890, avg: 1296.7,
-    queries: [
-      { label: "Show me running shoes", value: 410 },
-      { label: "What's on sale?", value: 380 },
-      { label: "Best wireless headphones", value: 290 },
-      { label: "Return policy", value: 270 },
-      { label: "Track my order", value: 210 },
-      { label: "Gift ideas under $50", value: 185 },
-      { label: "Summer collection", value: 155 },
-      { label: "Size guide", value: 130 },
-    ],
-    satisfaction: [
-      { label: "Helpful", value: 76, tone: "success" },
-      { label: "Neutral", value: 16, tone: "attention" },
-      { label: "Not helpful", value: 8, tone: "critical" },
-    ],
-    channels: [
-      { label: "Product pages", value: 55 },
-      { label: "Home page", value: 25 },
-      { label: "Collections", value: 13 },
-      { label: "Cart page", value: 7 },
-    ],
-    products: [
-      { name: "Nike Air Max 270", recs: 98, revenue: "$11,760", trend: "↑ 15%", trendUp: true },
-      { name: "Wireless Earbuds Pro", recs: 82, revenue: "$6,559.18", trend: "↑ 11%", trendUp: true },
-      { name: "Classic Denim Jacket", recs: 65, revenue: "$5,785", trend: "↓ 1%", trendUp: false },
-      { name: "Running Shorts", recs: 58, revenue: "$2,030", trend: "↑ 8%", trendUp: true },
-      { name: "Yoga Mat Premium", recs: 45, revenue: "$2,025", trend: "↑ 25%", trendUp: true },
-      { name: "Blue Hoodie", recs: 40, revenue: "$2,600", trend: "↑ 4%", trendUp: true },
-      { name: "Canvas Sneakers", recs: 34, revenue: "$1,496", trend: "↓ 4%", trendUp: false },
-    ],
-  },
-};
+async function fetchTopProducts(admin, limit) {
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query AnalyticsTopProducts($first: Int!) {
+        products(first: $first, sortKey: UPDATED_AT, reverse: true) {
+          nodes {
+            id
+            title
+            totalInventory
+            variants(first: 1) {
+              nodes {
+                price
+              }
+            }
+          }
+        }
+      }
+      `,
+      { variables: { first: limit } },
+    );
 
-// ─── Polaris Stat Card ─────────────────────────────────────────────────────────
+    const json = await response.json();
+    const nodes = json?.data?.products?.nodes || [];
+
+    return nodes.map((product) => ({
+      id: product.id,
+      name: product.title || "Untitled product",
+      inventory:
+        typeof product.totalInventory === "number" ? product.totalInventory : 0,
+      price: formatPrice(product?.variants?.nodes?.[0]?.price),
+      recs: 0,
+      revenue: "-",
+      trend: "n/a",
+      trendUp: true,
+    }));
+  } catch (_error) {
+    return [];
+  }
+}
+
+function formatPrice(rawPrice) {
+  const amount = Number(rawPrice);
+  if (!Number.isFinite(amount)) return "-";
+
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch (_error) {
+    return `$${amount.toFixed(2)}`;
+  }
+}
+
 function StatCard({ title, value, trend, trendUp, subtitle }) {
   return (
     <Card>
       <BlockStack gap="200">
-        <Text as="p" variant="bodySm" tone="subdued">{title}</Text>
+        <Text as="p" variant="bodySm" tone="subdued">
+          {title}
+        </Text>
         <InlineStack align="space-between" blockAlign="end">
-          <Text as="p" variant="heading2xl" fontWeight="bold">{value}</Text>
-          {trend && (
+          <Text as="p" variant="heading2xl" fontWeight="bold">
+            {value}
+          </Text>
+          {trend ? (
             <Badge tone={trendUp ? "success" : "critical"}>
-              {trendUp ? "▲" : "▼"} {trend}
+              {trendUp ? "+" : "-"} {trend}
             </Badge>
-          )}
+          ) : null}
         </InlineStack>
-        {subtitle && (
-          <Text as="p" variant="bodySm" tone="subdued">{subtitle}</Text>
-        )}
+        {subtitle ? (
+          <Text as="p" variant="bodySm" tone="subdued">
+            {subtitle}
+          </Text>
+        ) : null}
       </BlockStack>
     </Card>
   );
 }
 
-// ─── Vertical Bar Chart — Polaris Box + ProgressBar label ─────────────────────
 function VerticalBarChart({ data, color }) {
-  const max = Math.max(...data.map((d) => d.value));
-  const CHART_HEIGHT = 120;
+  if (!data.length) {
+    return (
+      <Text as="p" variant="bodySm" tone="subdued">
+        No chart data for this range.
+      </Text>
+    );
+  }
+
+  const max = Math.max(1, ...data.map((item) => item.value));
+  const chartHeight = 120;
+
   return (
     <Box>
       <InlineStack gap="300" blockAlign="end" wrap={false}>
         {data.map((item) => {
-          const barH = Math.max(6, Math.round((item.value / max) * CHART_HEIGHT));
+          const barHeight = Math.max(6, Math.round((item.value / max) * chartHeight));
           return (
             <BlockStack key={item.label} gap="100" align="center">
-              {/* Value label on top */}
               <Text as="p" variant="bodySm" tone="subdued" alignment="center">
                 {item.value}
               </Text>
-              {/* Polaris Box — uses Polaris background token + inline height only */}
               <Box
                 background={color || "bg-fill-success"}
                 borderRadius="100"
                 minWidth="36px"
-                style={{ height: `${barH}px` }}
+                style={{ height: `${barHeight}px` }}
               />
-              {/* Day label below */}
               <Text as="p" variant="bodySm" tone="subdued" alignment="center">
                 {item.label}
               </Text>
@@ -193,9 +152,17 @@ function VerticalBarChart({ data, color }) {
   );
 }
 
-// ─── Horizontal Bar Chart — 100% Polaris ProgressBar ─────────────────────────
 function HorizontalBarChart({ data, tone }) {
-  const max = Math.max(...data.map((d) => d.value));
+  if (!data.length) {
+    return (
+      <Text as="p" variant="bodySm" tone="subdued">
+        No data available.
+      </Text>
+    );
+  }
+
+  const max = Math.max(1, ...data.map((item) => item.value));
+
   return (
     <BlockStack gap="300">
       {data.map((item) => {
@@ -203,9 +170,13 @@ function HorizontalBarChart({ data, tone }) {
         return (
           <BlockStack key={item.label} gap="100">
             <InlineStack align="space-between">
-              <Text as="p" variant="bodyMd">{item.label}</Text>
+              <Text as="p" variant="bodyMd">
+                {item.label}
+              </Text>
               <InlineStack gap="200" blockAlign="center">
-                <Text as="p" variant="bodySm" tone="subdued">{item.value}</Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {item.value}
+                </Text>
                 <Badge>{pct}%</Badge>
               </InlineStack>
             </InlineStack>
@@ -217,14 +188,23 @@ function HorizontalBarChart({ data, tone }) {
   );
 }
 
-// ─── Donut-like Segment Chart — 100% Polaris ProgressBar stacked ──────────────
 function SegmentChart({ data }) {
+  if (!data.length) {
+    return (
+      <Text as="p" variant="bodySm" tone="subdued">
+        No ratings data available.
+      </Text>
+    );
+  }
+
   return (
     <BlockStack gap="300">
       {data.map((item) => (
         <BlockStack key={item.label} gap="100">
           <InlineStack align="space-between">
-            <Text as="p" variant="bodyMd">{item.label}</Text>
+            <Text as="p" variant="bodyMd">
+              {item.label}
+            </Text>
             <Badge tone={item.tone}>{item.value}%</Badge>
           </InlineStack>
           <ProgressBar
@@ -238,12 +218,160 @@ function SegmentChart({ data }) {
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+function rangeToDays(range) {
+  if (range === "7d") return 7;
+  if (range === "30d") return 30;
+  return 90;
+}
+
+function parseTimestamp(item) {
+  const value = item?.startedAtIso || item?.createdAt || item?.timestamp;
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function bucketLabels(range, now) {
+  if (range === "7d") {
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(now.getTime() - (6 - index) * DAY_MS);
+      return date.toLocaleDateString("en-US", { weekday: "short" });
+    });
+  }
+
+  if (range === "30d") {
+    return ["Week 1", "Week 2", "Week 3", "Week 4", "Week 5"];
+  }
+
+  return Array.from({ length: 3 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (2 - index), 1);
+    return date.toLocaleDateString("en-US", { month: "short" });
+  });
+}
+
+function buildSessionBars(conversations, range, now) {
+  const labels = bucketLabels(range, now);
+  const bars = labels.map((label) => ({ label, value: 0 }));
+
+  if (!conversations.length) {
+    return bars;
+  }
+
+  const days = rangeToDays(range);
+  const threshold = now.getTime() - days * DAY_MS;
+
+  conversations.forEach((conversation) => {
+    const stamp = parseTimestamp(conversation);
+    if (!stamp || stamp.getTime() < threshold) return;
+
+    if (range === "7d") {
+      const diffDays = Math.floor((now.getTime() - stamp.getTime()) / DAY_MS);
+      const targetIndex = 6 - diffDays;
+      if (bars[targetIndex]) bars[targetIndex].value += 1;
+      return;
+    }
+
+    if (range === "30d") {
+      const diffDays = Math.floor((now.getTime() - stamp.getTime()) / DAY_MS);
+      const weekIndex = Math.min(4, Math.floor((29 - diffDays) / 7));
+      if (bars[weekIndex]) bars[weekIndex].value += 1;
+      return;
+    }
+
+    const monthDiff =
+      (now.getFullYear() - stamp.getFullYear()) * 12 +
+      (now.getMonth() - stamp.getMonth());
+    const monthIndex = 2 - monthDiff;
+    if (bars[monthIndex]) bars[monthIndex].value += 1;
+  });
+
+  return bars;
+}
+
+function topQueryData(conversations) {
+  const counts = new Map();
+
+  conversations.forEach((conversation) => {
+    const query = String(conversation.firstMessage || "").trim();
+    if (!query) return;
+    counts.set(query, (counts.get(query) || 0) + 1);
+  });
+
+  return [...counts.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 7);
+}
+
+function buildRangeData({ conversations, products, range }) {
+  const now = new Date();
+  const days = rangeToDays(range);
+  const threshold = now.getTime() - days * DAY_MS;
+  const inRange = conversations.filter((conversation) => {
+    const stamp = parseTimestamp(conversation);
+    return stamp && stamp.getTime() >= threshold;
+  });
+
+  const totalSessions = inRange.length;
+  const totalMessages = inRange.reduce(
+    (sum, conversation) => sum + (Number(conversation.messages) || 0),
+    0,
+  );
+  const avgMessages = totalSessions
+    ? (totalMessages / totalSessions).toFixed(1)
+    : "0.0";
+  const resolvedCount = inRange.filter(
+    (conversation) => conversation.status === "resolved",
+  ).length;
+  const conversion = totalSessions
+    ? `${((resolvedCount / totalSessions) * 100).toFixed(1)}%`
+    : "0.0%";
+
+  const bars = buildSessionBars(inRange, range, now);
+  const peak = bars.reduce(
+    (best, bar) => (bar.value > best.value ? bar : best),
+    { label: "-", value: 0 },
+  );
+
+  return {
+    kpi: {
+      sessions: totalSessions,
+      messages: totalMessages,
+      avgLength: `${avgMessages} msgs`,
+      conversion,
+      convTrend: null,
+      convUp: true,
+    },
+    bars,
+    peakDay: peak.value ? `${peak.label} (${peak.value})` : "No sessions",
+    total: bars.reduce((sum, bar) => sum + bar.value, 0),
+    avg: bars.length
+      ? bars.reduce((sum, bar) => sum + bar.value, 0) / bars.length
+      : 0,
+    queries: topQueryData(inRange),
+    satisfaction: [],
+    channels: [],
+    products: products.map((product) => ({
+      name: product.name,
+      recs: product.recs,
+      revenue: product.revenue,
+      trend: product.trend,
+      trendUp: product.trendUp,
+      inventory: product.inventory,
+      price: product.price,
+    })),
+  };
+}
+
 export default function Analytics() {
+  const { conversations, products } = useLoaderData();
   const [dateRange, setDateRange] = useState("30d");
   const [selectedTab, setSelectedTab] = useState(0);
 
-  const data = useMemo(() => RANGE_DATA[dateRange], [dateRange]);
+  const data = useMemo(
+    () => buildRangeData({ conversations, products, range: dateRange }),
+    [conversations, products, dateRange],
+  );
 
   const dateOptions = [
     { label: "Last 7 days", value: "7d" },
@@ -257,37 +385,43 @@ export default function Analytics() {
     { id: "products", content: "Products" },
   ];
 
-  const handleTabChange = useCallback((i) => setSelectedTab(i), []);
+  const handleTabChange = useCallback((index) => setSelectedTab(index), []);
 
-  // Compute product table rows dynamically
   const productRows = useMemo(
     () =>
-      data.products.map((p) => [
-        p.name,
-        p.recs,
-        p.revenue,
-        <Badge key={p.name} tone={p.trendUp ? "success" : "critical"}>
-          {p.trend}
+      data.products.map((product) => [
+        product.name,
+        product.inventory,
+        product.price,
+        <Badge key={product.name} tone={product.trendUp ? "success" : "critical"}>
+          {product.trend}
         </Badge>,
       ]),
     [data.products],
   );
 
-  // Compute insights dynamically from data
   const insights = useMemo(() => {
+    if (!conversations.length) {
+      return [
+        { icon: "i", text: "No conversation logs found yet. Start by testing the storefront widget." },
+        { icon: "i", text: "Once chat events are stored, this page will calculate session, query, and conversion metrics automatically." },
+      ];
+    }
+
     const topQuery = data.queries[0];
-    const topProduct = data.products[0];
-    const bestGrowth = [...data.products].sort((a, b) => {
-      const aNum = parseFloat(a.trend.replace(/[^0-9.]/g, ""));
-      const bNum = parseFloat(b.trend.replace(/[^0-9.]/g, ""));
-      return b.trend.startsWith("↑") ? bNum - aNum : aNum - bNum;
-    })[0];
     return [
-      { icon: "💡", text: `"${topQuery.label}" is your #1 query. Consider adding a pinned answer in your bot.` },
-      { icon: "📈", text: `${bestGrowth.name} is trending with ${bestGrowth.trend} growth in recommendations.` },
-      { icon: "⚡", text: `${data.peakDay} was your peak. Ensure your AI API key has enough quota on busy days.` },
+      topQuery
+        ? {
+            icon: "i",
+            text: `"${topQuery.label}" is currently your most common customer question.`,
+          }
+        : { icon: "i", text: "No query insights available for this range." },
+      {
+        icon: "i",
+        text: `Peak period in this range: ${data.peakDay}.`,
+      },
     ];
-  }, [data]);
+  }, [conversations.length, data.queries, data.peakDay]);
 
   return (
     <Page>
@@ -296,7 +430,6 @@ export default function Analytics() {
       </TitleBar>
 
       <BlockStack gap="600">
-        {/* ── Date Range Selector ──────────────────────────── */}
         <InlineStack align="end" gap="300">
           <Box minWidth="180px">
             <Select
@@ -309,13 +442,28 @@ export default function Analytics() {
           </Box>
         </InlineStack>
 
-        {/* ── KPI Cards — all values update with dateRange ─── */}
         <Layout>
           {[
-            { title: "Total Sessions", value: data.kpi.sessions.toLocaleString(), trend: "18%", trendUp: true, subtitle: "vs previous period" },
-            { title: "Total Messages", value: data.kpi.messages.toLocaleString(), trend: "23%", trendUp: true, subtitle: "bot + customer" },
-            { title: "Avg. Session Length", value: data.kpi.avgLength, trend: "0:24", trendUp: true, subtitle: "per conversation" },
-            { title: "Chat-to-Purchase", value: data.kpi.conversion, trend: data.kpi.convTrend, trendUp: data.kpi.convUp, subtitle: "conversion rate" },
+            {
+              title: "Total Sessions",
+              value: data.kpi.sessions.toLocaleString(),
+              subtitle: "From stored chat logs",
+            },
+            {
+              title: "Total Messages",
+              value: data.kpi.messages.toLocaleString(),
+              subtitle: "User + bot messages",
+            },
+            {
+              title: "Avg. Session Size",
+              value: data.kpi.avgLength,
+              subtitle: "Average messages per session",
+            },
+            {
+              title: "Resolved Rate",
+              value: data.kpi.conversion,
+              subtitle: "Resolved conversations / total sessions",
+            },
           ].map((stat) => (
             <Layout.Section key={stat.title} variant="oneQuarter">
               <StatCard {...stat} />
@@ -323,120 +471,128 @@ export default function Analytics() {
           ))}
         </Layout>
 
-        {/* ── Tabbed Charts ────────────────────────────────── */}
         <Card padding="0">
           <Tabs tabs={tabs} selected={selectedTab} onSelect={handleTabChange}>
             <Box padding="400">
-              {/* TAB 0: Overview */}
-              {selectedTab === 0 && (
+              {selectedTab === 0 ? (
                 <Layout>
-                  {/* Vertical Bar Chart */}
                   <Layout.Section>
                     <BlockStack gap="400">
                       <InlineStack align="space-between" blockAlign="center">
                         <Text as="h2" variant="headingMd">
                           Sessions Over Period
                         </Text>
-                        <Badge tone="success">
-                          +18% vs previous
-                        </Badge>
+                        <Badge tone="info">{dateOptions.find((opt) => opt.value === dateRange)?.label}</Badge>
                       </InlineStack>
                       <Divider />
-
                       <VerticalBarChart data={data.bars} color="bg-fill-success" />
-
                       <Divider />
                       <InlineStack gap="600">
                         {[
                           { label: "Peak", value: data.peakDay },
-                          { label: "Total", value: data.total.toLocaleString() + " chats" },
-                          { label: "Average", value: data.avg.toFixed(1) + " / period" },
+                          { label: "Total", value: `${data.total.toLocaleString()} sessions` },
+                          { label: "Average", value: `${data.avg.toFixed(1)} per bucket` },
                         ].map(({ label, value }) => (
                           <BlockStack key={label} gap="050">
-                            <Text as="p" variant="bodySm" tone="subdued">{label}</Text>
-                            <Text as="p" variant="bodyMd" fontWeight="semibold">{value}</Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {label}
+                            </Text>
+                            <Text as="p" variant="bodyMd" fontWeight="semibold">
+                              {value}
+                            </Text>
                           </BlockStack>
                         ))}
                       </InlineStack>
                     </BlockStack>
                   </Layout.Section>
 
-                  {/* Sidebar Charts */}
                   <Layout.Section variant="oneThird">
                     <BlockStack gap="500">
-                      {/* Response Quality */}
                       <BlockStack gap="300">
-                        <Text as="h2" variant="headingMd">Response Quality</Text>
+                        <Text as="h2" variant="headingMd">
+                          Response Quality
+                        </Text>
                         <Divider />
                         <SegmentChart data={data.satisfaction} />
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Based on customer ratings.
-                        </Text>
                       </BlockStack>
 
                       <Divider />
 
-                      {/* Where chats start */}
                       <BlockStack gap="300">
-                        <Text as="h2" variant="headingMd">Where Chats Start</Text>
+                        <Text as="h2" variant="headingMd">
+                          Where Chats Start
+                        </Text>
                         <Divider />
-                        <SegmentChart data={data.channels.map(c => ({ ...c, tone: "info" }))} />
+                        <SegmentChart data={data.channels.map((entry) => ({ ...entry, tone: "info" }))} />
                       </BlockStack>
                     </BlockStack>
                   </Layout.Section>
                 </Layout>
-              )}
+              ) : null}
 
-              {/* TAB 1: Top Queries */}
-              {selectedTab === 1 && (
+              {selectedTab === 1 ? (
                 <BlockStack gap="400">
                   <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h2" variant="headingMd">Top Customer Queries</Text>
-                    <Button variant="plain" url="/app/chat-logs">View full logs</Button>
+                    <Text as="h2" variant="headingMd">
+                      Top Customer Queries
+                    </Text>
+                    <Button variant="plain" url="/app/chat-logs">
+                      View full logs
+                    </Button>
                   </InlineStack>
                   <Divider />
                   <HorizontalBarChart data={data.queries} tone="success" />
                 </BlockStack>
-              )}
+              ) : null}
 
-              {/* TAB 2: Products */}
-              {selectedTab === 2 && (
+              {selectedTab === 2 ? (
                 <BlockStack gap="400">
                   <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h2" variant="headingMd">Top Recommended Products</Text>
-                    <Badge tone="info">
-                      Last {dateRange === "7d" ? "7" : dateRange === "30d" ? "30" : "90"} days
-                    </Badge>
+                    <Text as="h2" variant="headingMd">
+                      Store Products
+                    </Text>
+                    <Badge tone="info">Live from Shopify</Badge>
                   </InlineStack>
                   <Divider />
-                  <DataTable
-                    columnContentTypes={["text", "numeric", "numeric", "text"]}
-                    headings={["Product", "Recommendations", "Revenue Influenced", "Trend"]}
-                    rows={productRows}
-                    footerContent={`Showing ${data.products.length} products`}
-                  />
+                  {productRows.length > 0 ? (
+                    <DataTable
+                      columnContentTypes={["text", "numeric", "text", "text"]}
+                      headings={["Product", "Inventory", "Price", "Trend"]}
+                      rows={productRows}
+                      footerContent={`Showing ${productRows.length} products`}
+                    />
+                  ) : (
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      No products found.
+                    </Text>
+                  )}
                 </BlockStack>
-              )}
+              ) : null}
             </Box>
           </Tabs>
         </Card>
 
-        {/* ── Insights Card — computed from live data ────────── */}
         <Card>
           <BlockStack gap="400">
-            <Text as="h2" variant="headingMd">Auto Insights</Text>
+            <Text as="h2" variant="headingMd">
+              Auto Insights
+            </Text>
             <Divider />
             <BlockStack gap="300">
-              {insights.map((insight, i) => (
+              {insights.map((insight) => (
                 <Box
-                  key={i}
+                  key={insight.text}
                   padding="300"
                   background="bg-surface-secondary"
                   borderRadius="200"
                 >
                   <InlineStack gap="300" blockAlign="start">
-                    <Text as="span" variant="bodyLg">{insight.icon}</Text>
-                    <Text as="p" variant="bodyMd" tone="subdued">{insight.text}</Text>
+                    <Text as="span" variant="bodyLg">
+                      {insight.icon}
+                    </Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      {insight.text}
+                    </Text>
                   </InlineStack>
                 </Box>
               ))}
@@ -444,12 +600,13 @@ export default function Analytics() {
           </BlockStack>
         </Card>
 
-        {/* ── Response Quality + Channel — always visible below tabs ── */}
         <Layout>
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Query Volume Distribution</Text>
+                <Text as="h2" variant="headingMd">
+                  Query Volume Distribution
+                </Text>
                 <Divider />
                 <HorizontalBarChart data={data.queries.slice(0, 5)} tone="success" />
               </BlockStack>
@@ -458,12 +615,11 @@ export default function Analytics() {
           <Layout.Section variant="oneThird">
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Session Source</Text>
+                <Text as="h2" variant="headingMd">
+                  Session Source
+                </Text>
                 <Divider />
-                <HorizontalBarChart
-                  data={data.channels.map((c) => ({ label: c.label, value: c.value }))}
-                  tone="info"
-                />
+                <HorizontalBarChart data={data.channels} tone="info" />
               </BlockStack>
             </Card>
           </Layout.Section>
