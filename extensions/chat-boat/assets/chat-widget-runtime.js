@@ -13,7 +13,6 @@
     busy: false,
     unread: 0,
     history: loadHistory(config.storageKey),
-    products: [],
     resources: [],
     sessionId: config.sessionId,
     visitorId: config.visitorId,
@@ -34,9 +33,8 @@
     );
   }
 
-  renderMessages(ui.messages, state.history, config.botInitials);
+  renderMessages(ui.messages, state.history, config.botInitials, config);
   renderQuickReplies(ui.quickReplies, config.quickReplies, sendUserMessage);
-  renderProducts(ui.productsTrack, state.products, config);
   renderResources(ui.resourcesList, state.resources);
   syncBadge(ui.badge, state.unread);
   syncSendState(ui.input, ui.sendButton, state.busy);
@@ -114,7 +112,6 @@
 
   function clearConversation() {
     state.history = [];
-    state.products = [];
     state.resources = [];
     state.unread = 0;
     state.sessionId = createSessionId(config.sessionKey);
@@ -133,8 +130,7 @@
       false
     );
     syncBadge(ui.badge, state.unread);
-    renderMessages(ui.messages, state.history, config.botInitials);
-    renderProducts(ui.productsTrack, state.products, config);
+    renderMessages(ui.messages, state.history, config.botInitials, config);
     renderResources(ui.resourcesList, state.resources);
   }
 
@@ -151,7 +147,7 @@
     syncSendState(ui.input, ui.sendButton, state.busy);
 
     pushMessage(state, config, "user", text, true);
-    renderMessages(ui.messages, state.history, config.botInitials);
+    renderMessages(ui.messages, state.history, config.botInitials, config);
     scrollMessagesToBottom(ui.messages);
 
     showTyping(ui.typing, true);
@@ -170,14 +166,15 @@
       botReply = await safeFallbackReply(text);
     }
 
-    state.products = await resolveProductsForSlider(text, botReply.products || [], config);
+    const responseProducts = await resolveProductsForSlider(text, botReply.products || [], config);
     state.resources = (botReply.resources || []).slice(0, 6);
-    renderProducts(ui.productsTrack, state.products, config);
     renderResources(ui.resourcesList, state.resources);
 
-    pushMessage(state, config, "bot", botReply.text, !state.open);
+    pushMessage(state, config, "bot", botReply.text, !state.open, {
+      products: responseProducts,
+    });
     syncBadge(ui.badge, state.unread);
-    renderMessages(ui.messages, state.history, config.botInitials);
+    renderMessages(ui.messages, state.history, config.botInitials, config);
     scrollMessagesToBottom(ui.messages);
 
     state.busy = false;
@@ -333,12 +330,6 @@ function renderBaseUI(config) {
   typing.appendChild(typingBubble);
 
   const quickReplies = createElement("div", "pcb-quick-replies");
-  const products = createElement("div", "pcb-products pcb-hidden");
-  const productsLabel = createElement("div", "pcb-products-label");
-  productsLabel.textContent = "Recommended products";
-  const productsTrack = createElement("div", "pcb-products-track");
-  products.appendChild(productsLabel);
-  products.appendChild(productsTrack);
 
   const resources = createElement("div", "pcb-resources pcb-hidden");
   const resourcesLabel = createElement("div", "pcb-resources-label");
@@ -370,7 +361,6 @@ function renderBaseUI(config) {
   panel.appendChild(messages);
   panel.appendChild(typing);
   panel.appendChild(quickReplies);
-  panel.appendChild(products);
   panel.appendChild(resources);
   panel.appendChild(inputRow);
   panel.appendChild(footer);
@@ -384,8 +374,6 @@ function renderBaseUI(config) {
     messages,
     typing,
     quickReplies,
-    products,
-    productsTrack,
     resources,
     resourcesList,
     input,
@@ -393,7 +381,7 @@ function renderBaseUI(config) {
   };
 }
 
-function renderMessages(container, history, botInitials) {
+function renderMessages(container, history, botInitials, config) {
   container.innerHTML = "";
   history.forEach((entry) => {
     const role = entry.role === "user" ? "user" : "bot";
@@ -414,6 +402,26 @@ function renderMessages(container, history, botInitials) {
 
     item.appendChild(row);
     item.appendChild(meta);
+
+    if (
+      role === "bot" &&
+      config?.showProductSlider !== false &&
+      Array.isArray(entry.products) &&
+      entry.products.length
+    ) {
+      const inlineProducts = createElement("div", "pcb-inline-products");
+      const inlineTrack = createElement(
+        "div",
+        "pcb-products-track pcb-inline-products-track",
+      );
+      const limit = Math.max(1, Number(config?.sliderLimit) || 5);
+      entry.products.slice(0, limit).forEach((product) => {
+        inlineTrack.appendChild(createProductCard(product, config));
+      });
+      inlineProducts.appendChild(inlineTrack);
+      item.appendChild(inlineProducts);
+    }
+
     container.appendChild(item);
   });
 }
@@ -439,75 +447,57 @@ function renderQuickReplies(container, replies, onReply) {
   container.classList.remove("pcb-hidden");
 }
 
-function renderProducts(track, products, config) {
-  track.innerHTML = "";
-  const parent = track.parentElement;
-  if (!parent) {
-    return;
+function createProductCard(product, config) {
+  const productUrl = normalizeProductUrl(product.url, product.title);
+  const cardAttrs = {
+    href: productUrl,
+    title: product.title || "Product",
+    target: config?.productClickTarget || "_self",
+  };
+  if (cardAttrs.target === "_blank") {
+    cardAttrs.rel = "noopener noreferrer";
+  }
+  const card = createElement("a", "pcb-product-card", cardAttrs);
+
+  if (product.image) {
+    const image = createElement("img", "pcb-product-img", {
+      src: product.image,
+      alt: product.title || "Product image",
+      loading: "lazy",
+    });
+    card.appendChild(image);
+  } else {
+    const placeholder = createElement("div", "pcb-product-img-placeholder");
+    placeholder.textContent = "P";
+    card.appendChild(placeholder);
   }
 
-  const sliderEnabled = config?.showProductSlider !== false;
-  const limit = Math.max(1, Number(config?.sliderLimit) || 5);
+  const info = createElement("div", "pcb-product-info");
+  const title = createElement("div", "pcb-product-title");
+  title.textContent = product.title || "Product";
+  info.appendChild(title);
 
-  if (!sliderEnabled || !products.length) {
-    parent.classList.add("pcb-hidden");
-    return;
+  if (product.price || (config?.showComparePrice && product.comparePrice)) {
+    const pricing = createElement("div", "pcb-product-pricing");
+    if (product.price) {
+      const price = createElement("div", "pcb-product-price");
+      price.textContent = product.price;
+      pricing.appendChild(price);
+    }
+    if (config?.showComparePrice && product.comparePrice) {
+      const compare = createElement("div", "pcb-product-compare");
+      compare.textContent = product.comparePrice;
+      pricing.appendChild(compare);
+    }
+    info.appendChild(pricing);
   }
+  card.appendChild(info);
 
-  products.slice(0, limit).forEach((product) => {
-    const productUrl = normalizeProductUrl(product.url, product.title);
-    const cardAttrs = {
-      href: productUrl,
-      title: product.title || "Product",
-      target: config?.productClickTarget || "_self",
-    };
-    if (cardAttrs.target === "_blank") {
-      cardAttrs.rel = "noopener noreferrer";
-    }
-    const card = createElement("a", "pcb-product-card", cardAttrs);
+  const cta = createElement("span", "pcb-product-btn");
+  cta.textContent = "View product";
+  card.appendChild(cta);
 
-    if (product.image) {
-      const image = createElement("img", "pcb-product-img", {
-        src: product.image,
-        alt: product.title || "Product image",
-        loading: "lazy",
-      });
-      card.appendChild(image);
-    } else {
-      const placeholder = createElement("div", "pcb-product-img-placeholder");
-      placeholder.textContent = "P";
-      card.appendChild(placeholder);
-    }
-
-    const info = createElement("div", "pcb-product-info");
-    const title = createElement("div", "pcb-product-title");
-    title.textContent = product.title || "Product";
-    info.appendChild(title);
-
-    if (product.price || (config?.showComparePrice && product.comparePrice)) {
-      const pricing = createElement("div", "pcb-product-pricing");
-      if (product.price) {
-        const price = createElement("div", "pcb-product-price");
-        price.textContent = product.price;
-        pricing.appendChild(price);
-      }
-      if (config?.showComparePrice && product.comparePrice) {
-        const compare = createElement("div", "pcb-product-compare");
-        compare.textContent = product.comparePrice;
-        pricing.appendChild(compare);
-      }
-      info.appendChild(pricing);
-    }
-    card.appendChild(info);
-
-    const cta = createElement("span", "pcb-product-btn");
-    cta.textContent = "View product";
-    card.appendChild(cta);
-
-    track.appendChild(card);
-  });
-
-  parent.classList.remove("pcb-hidden");
+  return card;
 }
 
 function renderResources(list, resources) {
@@ -1202,11 +1192,15 @@ function normalizeReplyText(data) {
   return "";
 }
 
-function pushMessage(state, config, role, text, countUnread) {
+function pushMessage(state, config, role, text, countUnread, options = {}) {
+  const normalizedProducts = Array.isArray(options.products)
+    ? normalizeProducts(options.products).slice(0, Math.max(1, Number(config?.sliderLimit) || 5))
+    : [];
   const entry = {
     role: role === "user" ? "user" : "bot",
     text: String(text || "").trim(),
     timestamp: Date.now(),
+    products: normalizedProducts,
   };
   if (!entry.text) {
     return;
@@ -1234,11 +1228,17 @@ function loadHistory(storageKey) {
 
     return parsed
       .filter((entry) => entry && (entry.role === "user" || entry.role === "bot") && typeof entry.text === "string")
-      .map((entry) => ({
-        role: entry.role,
-        text: entry.text,
-        timestamp: Number(entry.timestamp) || Date.now(),
-      }))
+      .map((entry) => {
+        const products = Array.isArray(entry.products)
+          ? normalizeProducts(entry.products).slice(0, 10)
+          : [];
+        return {
+          role: entry.role,
+          text: entry.text,
+          timestamp: Number(entry.timestamp) || Date.now(),
+          products,
+        };
+      })
       .slice(-40);
   } catch (_error) {
     return [];

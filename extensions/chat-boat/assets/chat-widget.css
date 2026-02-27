@@ -20,7 +20,6 @@
 #pcb-root *::after {
   box-sizing: border-box;
   margin: 0;
-  padding: 0px;
   font-family: var(--pcb-font);
   -webkit-tap-highlight-color: transparent;
 }
@@ -388,6 +387,16 @@
   color: #8f98a7;
 }
 
+.pcb-inline-products {
+  margin-left: 38px;
+  margin-top: 4px;
+  max-width: min(88%, 332px);
+}
+
+.pcb-inline-products-track {
+  padding: 2px 2px 4px;
+}
+
 /* Typing */
 .pcb-typing {
   display: flex;
@@ -521,6 +530,10 @@
   flex-direction: column;
   scroll-snap-align: start;
   transition: transform var(--pcb-ease), box-shadow var(--pcb-ease);
+}
+
+.pcb-inline-products .pcb-product-card {
+  width: 156px;
 }
 
 .pcb-product-card:hover {
