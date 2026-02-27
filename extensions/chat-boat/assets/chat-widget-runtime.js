@@ -151,20 +151,16 @@
     try {
       botReply = await fetchBotReply(config, state.history, text);
     } catch (_error) {
-      botReply = null;
+      botReply = await safeFallbackReply(text);
     }
 
     showTyping(ui.typing, false);
 
     if (!botReply || !botReply.text) {
-      botReply = {
-        text: "I could not find that. Try asking about order tracking, products, discounts, shipping, or store info.",
-        products: [],
-        resources: [],
-      };
+      botReply = await safeFallbackReply(text);
     }
 
-    state.products = (botReply.products || []).slice(0, 5);
+    state.products = await resolveProductsForSlider(text, botReply.products || []);
     state.resources = (botReply.resources || []).slice(0, 6);
     renderProducts(ui.productsTrack, state.products);
     renderResources(ui.resourcesList, state.resources);
@@ -543,6 +539,75 @@ async function requestReplyFromApi(config, history, userText) {
   }
 
   return null;
+}
+
+async function safeFallbackReply(userText) {
+  try {
+    const reply = await fallbackReply(userText);
+    if (reply && reply.text) {
+      return reply;
+    }
+  } catch (_error) {
+    // Ignore and return a deterministic emergency reply below.
+  }
+
+  const query = String(userText || "").trim();
+  return {
+    text: query
+      ? `I could not process "${query}" right now. Try asking about products, discounts, shipping, or order tracking.`
+      : "I could not process that right now. Try asking about products, discounts, shipping, or order tracking.",
+    products: [],
+    resources: [],
+  };
+}
+
+async function resolveProductsForSlider(userText, replyProducts) {
+  const limit = 5;
+  const query = String(userText || "").trim();
+  const intent = detectIntent(query);
+  const normalizedReplyProducts = normalizeProducts(
+    Array.isArray(replyProducts) ? replyProducts : [],
+  );
+
+  // Keep API-provided products first, but complete the slider with related results.
+  if (intent === "order" || intent === "shipping" || intent === "store") {
+    return normalizedReplyProducts.slice(0, limit);
+  }
+
+  if (normalizedReplyProducts.length >= limit) {
+    return normalizedReplyProducts.slice(0, limit);
+  }
+
+  const related = await searchStorefrontProducts(query);
+  let merged = mergeUniqueProducts(normalizedReplyProducts, related, limit);
+
+  if (merged.length === 0) {
+    merged = mergeUniqueProducts(normalizedReplyProducts, await getTopProducts(), limit);
+  }
+
+  return merged;
+}
+
+function mergeUniqueProducts(primaryProducts, secondaryProducts, limit) {
+  const output = [];
+  const seen = new Set();
+  const max = Math.max(1, Number(limit) || 5);
+
+  const pushUnique = (product) => {
+    if (!product || !product.title) {
+      return;
+    }
+    const key = String(product.url || product.title).toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    output.push(product);
+  };
+
+  (primaryProducts || []).forEach(pushUnique);
+  (secondaryProducts || []).forEach(pushUnique);
+  return output.slice(0, max);
 }
 
 function buildCandidateEndpoints(baseUrl) {
@@ -1212,6 +1277,32 @@ function expandHex(hex) {
 function rgbToHex(r, g, b) {
   const toHex = (value) => value.toString(16).padStart(2, "0");
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function matchesAny(text, terms) {
+  const source = String(text || "").toLowerCase();
+  if (!source || !Array.isArray(terms)) {
+    return false;
+  }
+
+  return terms.some((term) => source.includes(String(term || "").toLowerCase()));
+}
+
+function formatPrice(amount) {
+  const value = Number(amount);
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch (_error) {
+    return `$${value.toFixed(2)}`;
+  }
 }
 
 function tokenize(text) {
