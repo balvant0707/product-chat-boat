@@ -564,25 +564,19 @@ async function safeFallbackReply(userText) {
 async function resolveProductsForSlider(userText, replyProducts) {
   const limit = 5;
   const query = String(userText || "").trim();
-  const intent = detectIntent(query);
   const normalizedReplyProducts = normalizeProducts(
     Array.isArray(replyProducts) ? replyProducts : [],
   );
-
-  // Keep API-provided products first, but complete the slider with related results.
-  if (intent === "order" || intent === "shipping" || intent === "store") {
-    return normalizedReplyProducts.slice(0, limit);
-  }
 
   if (normalizedReplyProducts.length >= limit) {
     return normalizedReplyProducts.slice(0, limit);
   }
 
-  const related = await searchStorefrontProducts(query);
+  const related = query ? await searchStorefrontProducts(query) : [];
   let merged = mergeUniqueProducts(normalizedReplyProducts, related, limit);
 
-  if (merged.length === 0) {
-    merged = mergeUniqueProducts(normalizedReplyProducts, await getTopProducts(), limit);
+  if (merged.length < limit) {
+    merged = mergeUniqueProducts(merged, await getTopProducts(), limit);
   }
 
   return merged;
