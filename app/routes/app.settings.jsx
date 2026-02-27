@@ -18,12 +18,14 @@ import {
   Tooltip,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
-  return null;
+  const { session } = await authenticate.admin(request);
+  return {
+    themeEditorUrl: `https://${session.shop}/admin/themes/current/editor?context=apps`,
+  };
 };
 
 export const action = async ({ request }) => {
@@ -233,6 +235,7 @@ function WidgetPreview({ botName, welcomeMessage, primaryColor, position }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function Settings() {
   const fetcher = useFetcher();
+  const { themeEditorUrl } = useLoaderData();
   const shopify = useAppBridge();
 
   // ── Form state ────────────────────────────────────────
@@ -353,6 +356,24 @@ export default function Settings() {
             </InlineStack>
           </Banner>
         )}
+
+        <Card>
+          <BlockStack gap="300">
+            <SectionHeader
+              title="Storefront Widget Controls"
+              subtitle="Frontend behavior options are managed in Shopify Admin app embed settings."
+            />
+            <Divider />
+            <Text as="p" variant="bodyMd" tone="subdued">
+              Configure product slider visibility, compare-at price display, click behavior, quick replies, and widget placement from the app embed controls.
+            </Text>
+            <InlineStack align="start">
+              <Button url={themeEditorUrl} variant="primary">
+                Open App Embed Settings
+              </Button>
+            </InlineStack>
+          </BlockStack>
+        </Card>
 
         <Layout>
           {/* ── Left Column ───────────────────────────── */}

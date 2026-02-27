@@ -34,7 +34,7 @@
 
   renderMessages(ui.messages, state.history, config.botInitials);
   renderQuickReplies(ui.quickReplies, config.quickReplies, sendUserMessage);
-  renderProducts(ui.productsTrack, state.products);
+  renderProducts(ui.productsTrack, state.products, config);
   renderResources(ui.resourcesList, state.resources);
   syncBadge(ui.badge, state.unread);
   syncSendState(ui.input, ui.sendButton, state.busy);
@@ -125,7 +125,7 @@
     );
     syncBadge(ui.badge, state.unread);
     renderMessages(ui.messages, state.history, config.botInitials);
-    renderProducts(ui.productsTrack, state.products);
+    renderProducts(ui.productsTrack, state.products, config);
     renderResources(ui.resourcesList, state.resources);
   }
 
@@ -160,9 +160,9 @@
       botReply = await safeFallbackReply(text);
     }
 
-    state.products = await resolveProductsForSlider(text, botReply.products || []);
+    state.products = await resolveProductsForSlider(text, botReply.products || [], config);
     state.resources = (botReply.resources || []).slice(0, 6);
-    renderProducts(ui.productsTrack, state.products);
+    renderProducts(ui.productsTrack, state.products, config);
     renderResources(ui.resourcesList, state.resources);
 
     pushMessage(state, config, "bot", botReply.text, !state.open);
@@ -205,6 +205,19 @@ function buildConfig(root) {
     buttonSize: clampNumber(parseInt(data.btnSize || "56", 10), 44, 72, 56),
     autoOpen: parseBoolean(data.autoOpen),
     showOnMobile: data.showMobile !== undefined ? parseBoolean(data.showMobile) : true,
+    showProductSlider:
+      data.showProductSlider !== undefined
+        ? parseBoolean(data.showProductSlider)
+        : true,
+    showComparePrice:
+      data.showComparePrice !== undefined
+        ? parseBoolean(data.showComparePrice)
+        : true,
+    productClickTarget:
+      String(data.productClickTarget || "same-tab").toLowerCase() === "new-tab"
+        ? "_blank"
+        : "_self",
+    sliderLimit: clampNumber(parseInt(data.sliderLimit || "5", 10), 1, 10, 5),
     shop,
     apiUrl: normalizeApiBaseUrl(data.apiUrl),
     quickReplies: quickReplies.length ? quickReplies : PCB_DEFAULT_QUICK_REPLIES,
@@ -398,23 +411,32 @@ function renderQuickReplies(container, replies, onReply) {
   container.classList.remove("pcb-hidden");
 }
 
-function renderProducts(track, products) {
+function renderProducts(track, products, config) {
   track.innerHTML = "";
   const parent = track.parentElement;
   if (!parent) {
     return;
   }
 
-  if (!products.length) {
+  const sliderEnabled = config?.showProductSlider !== false;
+  const limit = Math.max(1, Number(config?.sliderLimit) || 5);
+
+  if (!sliderEnabled || !products.length) {
     parent.classList.add("pcb-hidden");
     return;
   }
 
-  products.forEach((product) => {
-    const card = createElement("a", "pcb-product-card", {
-      href: product.url || "#",
+  products.slice(0, limit).forEach((product) => {
+    const productUrl = normalizeProductUrl(product.url, product.title);
+    const cardAttrs = {
+      href: productUrl,
       title: product.title || "Product",
-    });
+      target: config?.productClickTarget || "_self",
+    };
+    if (cardAttrs.target === "_blank") {
+      cardAttrs.rel = "noopener noreferrer";
+    }
+    const card = createElement("a", "pcb-product-card", cardAttrs);
 
     if (product.image) {
       const image = createElement("img", "pcb-product-img", {
@@ -432,11 +454,21 @@ function renderProducts(track, products) {
     const info = createElement("div", "pcb-product-info");
     const title = createElement("div", "pcb-product-title");
     title.textContent = product.title || "Product";
-    const price = createElement("div", "pcb-product-price");
-    price.textContent = product.price || "";
     info.appendChild(title);
-    if (product.price) {
-      info.appendChild(price);
+
+    if (product.price || (config?.showComparePrice && product.comparePrice)) {
+      const pricing = createElement("div", "pcb-product-pricing");
+      if (product.price) {
+        const price = createElement("div", "pcb-product-price");
+        price.textContent = product.price;
+        pricing.appendChild(price);
+      }
+      if (config?.showComparePrice && product.comparePrice) {
+        const compare = createElement("div", "pcb-product-compare");
+        compare.textContent = product.comparePrice;
+        pricing.appendChild(compare);
+      }
+      info.appendChild(pricing);
     }
     card.appendChild(info);
 
@@ -561,8 +593,13 @@ async function safeFallbackReply(userText) {
   };
 }
 
-async function resolveProductsForSlider(userText, replyProducts) {
-  const limit = 5;
+async function resolveProductsForSlider(userText, replyProducts, config) {
+  const sliderEnabled = config?.showProductSlider !== false;
+  if (!sliderEnabled) {
+    return [];
+  }
+
+  const limit = Math.max(1, Number(config?.sliderLimit) || 5);
   const query = String(userText || "").trim();
   const normalizedReplyProducts = normalizeProducts(
     Array.isArray(replyProducts) ? replyProducts : [],
@@ -825,14 +862,23 @@ function normalizePredictiveProducts(rawProducts) {
 
   return rawProducts.map((item) => {
     const minPrice = item && item.price ? item.price.min_variant_price : null;
+    const compareAt = item && item.price ? item.price.compare_at_price : null;
     const price = minPrice && minPrice.amount
-      ? `${minPrice.currency_code || ""} ${minPrice.amount}`.trim()
-      : "";
+      ? formatMoneyAmount(minPrice.amount, minPrice.currency_code)
+      : normalizePriceValue(item && (item.price || item.formattedPrice));
+    const comparePrice = compareAt && compareAt.amount
+      ? formatMoneyAmount(compareAt.amount, compareAt.currency_code || minPrice?.currency_code)
+      : normalizePriceValue(item && (item.compare_at_price || item.comparePrice || item.compareAtPrice));
+    const productUrl = normalizeProductUrl(
+      item && (item.url || item.link || item.online_store_url || item.handle),
+      item && item.title,
+    );
     return {
       title: item.title || "Product",
-      url: item.url || "#",
+      url: productUrl,
       image: item.featured_image && item.featured_image.url ? item.featured_image.url : "",
       price,
+      comparePrice,
     };
   });
 }
@@ -913,9 +959,13 @@ async function findDiscountedProducts(queryText) {
     .slice(0, 5)
     .map((row) => {
       const normalized = normalizeStorefrontProduct(row.product);
+      const variant = Array.isArray(row.product.variants) && row.product.variants.length
+        ? row.product.variants[0]
+        : null;
+      const compareAt = variant && variant.compare_at_price ? Number(variant.compare_at_price) : 0;
       return {
         ...normalized,
-        price: `${normalized.price} (Save ${formatPrice(row.saved)})`,
+        comparePrice: compareAt > 0 ? formatPrice(compareAt) : normalized.comparePrice,
       };
     });
 }
@@ -1013,13 +1063,15 @@ async function fetchPolicySnippet(path) {
 function normalizeStorefrontProduct(product) {
   const variant = Array.isArray(product.variants) && product.variants.length ? product.variants[0] : null;
   const rawPrice = variant && variant.price ? Number(variant.price) : 0;
+  const rawCompareAt = variant && variant.compare_at_price ? Number(variant.compare_at_price) : 0;
   const handle = product.handle || "";
   const image = Array.isArray(product.images) && product.images.length ? product.images[0] : "";
 
   return {
     title: product.title || "Product",
     price: rawPrice > 0 ? formatPrice(rawPrice) : "",
-    url: handle ? `/products/${handle}` : "#",
+    comparePrice: rawCompareAt > rawPrice && rawPrice > 0 ? formatPrice(rawCompareAt) : "",
+    url: normalizeProductUrl(handle, product.title),
     image: typeof image === "string" ? image : "",
   };
 }
@@ -1052,14 +1104,24 @@ function normalizeProducts(rawProducts) {
   return rawProducts
     .map((item) => {
       const title = item.title || item.name || "";
-      const url = item.url || item.link || "#";
+      const url = normalizeProductUrl(
+        item.url || item.link || item.onlineStoreUrl || item.online_store_url || item.handle,
+        title,
+      );
       const image = item.image || item.imageUrl || item.thumbnail || "";
-      const price = item.price || item.formattedPrice || "";
+      const price = normalizePriceValue(item.price || item.formattedPrice || item.amount);
+      const comparePrice = normalizePriceValue(
+        item.comparePrice ||
+          item.compare_at_price ||
+          item.compareAtPrice ||
+          item.formattedComparePrice,
+      );
       return {
         title: String(title || "Product"),
-        url: String(url || "#"),
+        url: String(url || normalizeProductUrl("", title)),
         image: String(image || ""),
         price: String(price || ""),
+        comparePrice: String(comparePrice || ""),
       };
     })
     .filter((item) => item.title);
@@ -1297,6 +1359,68 @@ function formatPrice(amount) {
   } catch (_error) {
     return `$${value.toFixed(2)}`;
   }
+}
+
+function formatMoneyAmount(amount, currencyCode) {
+  const value = Number(amount);
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  const currency = String(currencyCode || "USD").toUpperCase();
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch (_error) {
+    return formatPrice(value);
+  }
+}
+
+function normalizePriceValue(rawValue) {
+  if (rawValue === null || rawValue === undefined) {
+    return "";
+  }
+
+  if (typeof rawValue === "number") {
+    return formatPrice(rawValue);
+  }
+
+  const text = String(rawValue).trim();
+  if (!text) {
+    return "";
+  }
+
+  const numeric = Number(text.replace(/[^0-9.-]/g, ""));
+  if (Number.isFinite(numeric) && /[0-9]/.test(text) && !/[$€£₹]/.test(text)) {
+    return formatPrice(numeric);
+  }
+
+  return text;
+}
+
+function normalizeProductUrl(rawUrl, title) {
+  const value = String(rawUrl || "").trim();
+  if (value) {
+    if (/^https?:\/\//i.test(value)) {
+      return value;
+    }
+    if (value.startsWith("/")) {
+      return value;
+    }
+    if (value.startsWith("products/") || value.startsWith("collections/")) {
+      return `/${value}`;
+    }
+    return `/products/${value.replace(/^\/+/, "")}`;
+  }
+
+  const fallbackQuery = String(title || "").trim();
+  if (fallbackQuery) {
+    return `/search?q=${encodeURIComponent(fallbackQuery)}`;
+  }
+  return "/collections/all";
 }
 
 function tokenize(text) {

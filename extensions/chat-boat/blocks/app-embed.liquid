@@ -13,6 +13,10 @@
   data-btn-size="{{ block.settings.button_size }}"
   data-auto-open="{{ block.settings.open_on_load }}"
   data-show-mobile="{{ block.settings.show_on_mobile }}"
+  data-show-product-slider="{{ block.settings.show_product_slider }}"
+  data-show-compare-price="{{ block.settings.show_compare_price }}"
+  data-product-click-target="{{ block.settings.product_click_target }}"
+  data-slider-limit="{{ block.settings.slider_limit }}"
   data-shop="{{ shop.permanent_domain }}"
   data-api-url="{{ block.settings.app_url | default: '' }}"
   data-quick-replies="{{ block.settings.quick_replies | escape }}"
@@ -93,6 +97,41 @@
       "id": "show_on_mobile",
       "label": "Show on mobile devices",
       "default": true
+    },
+    {
+      "type": "header",
+      "content": "Product Slider"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_product_slider",
+      "label": "Show product slider in chat",
+      "default": true
+    },
+    {
+      "type": "checkbox",
+      "id": "show_compare_price",
+      "label": "Show compare-at price",
+      "default": true
+    },
+    {
+      "type": "range",
+      "id": "slider_limit",
+      "label": "Products per slider",
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "default": 5
+    },
+    {
+      "type": "select",
+      "id": "product_click_target",
+      "label": "Product click behavior",
+      "options": [
+        { "value": "same-tab", "label": "Open in same tab" },
+        { "value": "new-tab", "label": "Open in new tab" }
+      ],
+      "default": "same-tab"
     },
     {
       "type": "header",
