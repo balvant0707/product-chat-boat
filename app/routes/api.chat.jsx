@@ -10,23 +10,23 @@ function withCorsHeaders(headers = {}) {
   };
 }
 
-export function loader() {
+export function loader({ request }) {
+  // Handle preflight OPTIONS requests that some browsers route through loader
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: withCorsHeaders() });
+  }
   return json(
     { ok: true, endpoint: "/api/chat" },
-    {
-      headers: withCorsHeaders(),
-    },
+    { headers: withCorsHeaders() },
   );
 }
 
-export function options() {
-  return new Response(null, {
-    status: 204,
-    headers: withCorsHeaders(),
-  });
-}
-
 export async function action({ request }) {
+  // Handle CORS preflight (OPTIONS) — Remix routes non-GET to action
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: withCorsHeaders() });
+  }
+
   try {
     const body = await request.json();
     const shopDomain = String(body?.shop || "").trim().toLowerCase();

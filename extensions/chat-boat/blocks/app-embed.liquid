@@ -19,7 +19,7 @@
   data-product-click-target="{{ block.settings.product_click_target }}"
   data-slider-limit="{{ block.settings.slider_limit }}"
   data-shop="{{ shop.permanent_domain }}"
-  data-api-url="{{ block.settings.app_url | default: '' }}"
+  data-api-url="{{ block.settings.app_url | default: 'https://product-chat-boat.vercel.app' | strip }}"
   data-show-powered-by="{{ block.settings.show_powered_by }}"
   data-test-mode="{{ block.settings.test_mode }}"
   data-quick-replies="{{ block.settings.quick_replies | escape }}"
@@ -162,7 +162,8 @@
       "type": "text",
       "id": "app_url",
       "label": "App URL",
-      "info": "Your Shopify app base URL, e.g. https://your-app.fly.dev"
+      "default": "https://product-chat-boat.vercel.app",
+      "info": "Your Shopify app base URL. In dev mode replace with your tunnel URL."
     }
   ]
 }

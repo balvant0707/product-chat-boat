@@ -186,9 +186,9 @@
   // ─── API fetch ──────────────────────────────────────────────────────────────
 
   async function fetchBotReply(cfg, history, message) {
-    const endpoint = cfg.apiUrl
-      ? `${cfg.apiUrl}/api/chat`
-      : "/apps/product-chat-boat/api/chat";
+    // Resolve the best endpoint: configured apiUrl → same-origin fallback
+    const base = (cfg.apiUrl || "").trim().replace(/\/+$/, "");
+    const endpoint = base ? `${base}/api/chat` : "/api/chat";
 
     const historyPayload = history
       .filter((e) => e.role === "user" || e.role === "bot")
@@ -209,7 +209,10 @@
       }),
     });
 
-    if (!response.ok) throw new Error(`API ${response.status}`);
+    if (!response.ok) {
+      console.error("[PCB] API error", response.status, endpoint);
+      throw new Error(`API ${response.status}`);
+    }
     return response.json();
   }
 
@@ -224,8 +227,6 @@
   ];
 
   // ─── Config ─────────────────────────────────────────────────────────────────
-
-  const pcbCache = { products: null, searchResults: new Map() };
 
   function buildConfig(root) {
     const d = root.dataset;
@@ -1000,13 +1001,6 @@
       .replace(/"/g, "&quot;");
   }
 
-  async function resolveProductsForSlider(text, rawProducts, cfg) {
-    if (!cfg.showProductSlider) return [];
-    let products = normalizeProducts(rawProducts || []);
-    if (products.length) return products.slice(0, cfg.sliderLimit);
-    return [];
-  }
-
   function normalizeProducts(rawProducts) {
     if (!Array.isArray(rawProducts)) return [];
     return rawProducts
@@ -1228,11 +1222,6 @@
     return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
   }
 
-  function matchesAny(text, terms) {
-    const source = String(text || "").toLowerCase();
-    if (!source || !Array.isArray(terms)) return false;
-    return terms.some((t) => source.includes(String(t || "").toLowerCase()));
-  }
 
   function formatMoneyAmount(amount, currencyCode) {
     const value = Number(amount);
