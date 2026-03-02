@@ -29,7 +29,7 @@
       config,
       "bot",
       "Ask about order tracking, product search, discount offers, shipping, or store policies.",
-      false
+      false,
     );
   }
 
@@ -48,38 +48,28 @@
     }, 300);
   }
 
+  // ─── Event wiring ──────────────────────────────────────────────────────────
+
   function wireEvents() {
-    ui.toggleButton.addEventListener("click", () => {
-      toggleOpen(!state.open);
-    });
+    ui.toggleButton.addEventListener("click", () => toggleOpen(!state.open));
+    ui.closeButton.addEventListener("click", () => toggleOpen(false));
+    ui.clearButton.addEventListener("click", clearConversation);
 
-    ui.closeButton.addEventListener("click", () => {
-      toggleOpen(false);
-    });
+    ui.sendButton.addEventListener("click", () => void sendUserMessage(ui.input.value));
 
-    ui.clearButton.addEventListener("click", () => {
-      clearConversation();
-    });
+    ui.input.addEventListener("input", () =>
+      syncSendState(ui.input, ui.sendButton, state.busy),
+    );
 
-    ui.sendButton.addEventListener("click", () => {
-      void sendUserMessage(ui.input.value);
-    });
-
-    ui.input.addEventListener("input", () => {
-      syncSendState(ui.input, ui.sendButton, state.busy);
-    });
-
-    ui.input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
+    ui.input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
         void sendUserMessage(ui.input.value);
       }
     });
 
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && state.open) {
-        toggleOpen(false);
-      }
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && state.open) toggleOpen(false);
     });
 
     window.addEventListener("resize", updateMobileVisibility);
@@ -89,9 +79,7 @@
     const isMobile = window.matchMedia("(max-width: 480px)").matches;
     const shouldHide = isMobile && !config.showOnMobile;
     root.classList.toggle("pcb-hidden", shouldHide);
-    if (shouldHide) {
-      toggleOpen(false);
-    }
+    if (shouldHide) toggleOpen(false);
   }
 
   function toggleOpen(nextOpen) {
@@ -103,9 +91,7 @@
     if (nextOpen) {
       state.unread = 0;
       syncBadge(ui.badge, state.unread);
-      setTimeout(() => {
-        ui.input.focus();
-      }, 30);
+      setTimeout(() => ui.input.focus(), 30);
       scrollMessagesToBottom(ui.messages);
     }
   }
@@ -118,35 +104,32 @@
     config.sessionId = state.sessionId;
     try {
       localStorage.setItem(config.sessionKey, state.sessionId);
-    } catch (_error) {
-      // Ignore storage failures.
-    }
+    } catch (_e) {}
+
     pushMessage(state, config, "bot", config.welcomeMessage, false);
     pushMessage(
       state,
       config,
       "bot",
       "Ask about order tracking, product search, discount offers, shipping, or store policies.",
-      false
+      false,
     );
     syncBadge(ui.badge, state.unread);
     renderMessages(ui.messages, state.history, config.botInitials, config);
     renderResources(ui.resourcesList, state.resources);
   }
 
+  // ─── Message sending ────────────────────────────────────────────────────────
+
   async function sendUserMessage(rawText) {
     const text = (rawText || "").trim();
-    if (!text || state.busy) {
-      return;
-    }
+    if (!text || state.busy) return;
 
     state.busy = true;
-    syncSendState(ui.input, ui.sendButton, state.busy);
-
     ui.input.value = "";
     syncSendState(ui.input, ui.sendButton, state.busy);
 
-    pushMessage(state, config, "user", text, true);
+    pushMessage(state, config, "user", text, false);
     renderMessages(ui.messages, state.history, config.botInitials, config);
     scrollMessagesToBottom(ui.messages);
 
@@ -156,23 +139,41 @@
     try {
       config.sessionId = state.sessionId;
       botReply = await fetchBotReply(config, state.history, text);
-    } catch (_error) {
-      botReply = await safeFallbackReply(text);
+    } catch (_e) {
+      botReply = null;
     }
 
     showTyping(ui.typing, false);
 
     if (!botReply || !botReply.text) {
-      botReply = await safeFallbackReply(text);
+      botReply = {
+        text: "I'm having trouble right now. Please try again in a moment.",
+        type: "text",
+        products: [],
+        resources: [],
+        quickReplies: ["Track order", "Search products", "Shipping info"],
+      };
     }
 
-    const responseProducts = await resolveProductsForSlider(text, botReply.products || [], config);
-    state.resources = (botReply.resources || []).slice(0, 6);
+    const botProducts = normalizeProducts(botReply.products || []).slice(
+      0,
+      config.sliderLimit,
+    );
+    state.resources = normalizeResources(botReply.resources || []).slice(0, 6);
     renderResources(ui.resourcesList, state.resources);
 
+    // Push the bot message with rich data
     pushMessage(state, config, "bot", botReply.text, !state.open, {
-      products: responseProducts,
+      products: botProducts,
+      type: botReply.type || "text",
+      data: botReply.data || null,
     });
+
+    // Update quick replies from server response
+    if (Array.isArray(botReply.quickReplies) && botReply.quickReplies.length) {
+      renderQuickReplies(ui.quickReplies, botReply.quickReplies, sendUserMessage);
+    }
+
     syncBadge(ui.badge, state.unread);
     renderMessages(ui.messages, state.history, config.botInitials, config);
     scrollMessagesToBottom(ui.messages);
@@ -180,1358 +181,1109 @@
     state.busy = false;
     syncSendState(ui.input, ui.sendButton, state.busy);
     ui.input.focus();
-}
-
-const PCB_DEFAULT_QUICK_REPLIES = [
-  "Order tracking",
-  "Product search",
-  "Discount offers",
-  "Shipping info",
-  "Store policies",
-];
-
-const pcbCache = {
-  products: null,
-  searchResults: new Map(),
-  pathStatus: new Map(),
-  policySnippet: new Map(),
-};
-
-function buildConfig(root) {
-  const data = root.dataset;
-  const color = sanitizeColor(data.color || "#008060");
-  const shop = (data.shop || window.location.hostname || "shop").toLowerCase();
-  const quickReplies = parseQuickReplies(data.quickReplies);
-  const visitorKey = `pcb-visitor:${shop}`;
-  const sessionKey = `pcb-session:${shop}`;
-  const visitorId = getOrCreateStorageValue(visitorKey, createVisitorId);
-  const sessionId = getOrCreateStorageValue(sessionKey, createSessionId);
-
-  return {
-    botName: (data.botName || "Shop Assistant").trim(),
-    subtitle: (data.subtitle || "Online now").trim(),
-    botInitials: getInitials(data.botName || "Shop Assistant"),
-    welcomeMessage: (data.welcome || "Hi! Ask me about products, pricing, or recommendations.").trim(),
-    primaryColor: color,
-    primaryColorDark: darkenColor(color, 20),
-    buttonSize: clampNumber(parseInt(data.btnSize || "56", 10), 44, 72, 56),
-    autoOpen: parseBoolean(data.autoOpen),
-    showOnMobile: data.showMobile !== undefined ? parseBoolean(data.showMobile) : true,
-    showProductSlider:
-      data.showProductSlider !== undefined
-        ? parseBoolean(data.showProductSlider)
-        : true,
-    showComparePrice:
-      data.showComparePrice !== undefined
-        ? parseBoolean(data.showComparePrice)
-        : true,
-    productClickTarget:
-      String(data.productClickTarget || "same-tab").toLowerCase() === "new-tab"
-        ? "_blank"
-        : "_self",
-    sliderLimit: clampNumber(parseInt(data.sliderLimit || "5", 10), 1, 10, 5),
-    showPoweredBy:
-      data.showPoweredBy !== undefined
-        ? parseBoolean(data.showPoweredBy)
-        : true,
-    testMode: parseBoolean(data.testMode),
-    shop,
-    apiUrl: normalizeApiBaseUrl(data.apiUrl),
-    quickReplies: quickReplies.length ? quickReplies : PCB_DEFAULT_QUICK_REPLIES,
-    storageKey: `pcb-history:${shop}`,
-    visitorKey,
-    sessionKey,
-    visitorId,
-    sessionId,
-  };
-}
-
-function applyTheme(root, config) {
-  root.style.setProperty("--pcb-color", config.primaryColor);
-  root.style.setProperty("--pcb-color-dark", config.primaryColorDark);
-  root.style.setProperty("--pcb-btn-size", `${config.buttonSize}px`);
-}
-
-function renderBaseUI(config) {
-  const toggleButton = createElement("button", "pcb-toggle", {
-    type: "button",
-    "aria-label": "Toggle chat widget",
-    "aria-expanded": "false",
-  });
-
-  const chatIcon = iconNode(
-    "pcb-toggle-icon pcb-toggle-icon--chat",
-    "M12 3C7.03 3 3 6.58 3 11c0 2.12.94 4.05 2.47 5.49L5 21l4.1-2.23c.91.25 1.88.38 2.9.38 4.97 0 9-3.58 9-8s-4.03-8.15-9-8.15Zm-3.2 9.2a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm3.2 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm3.2 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Z"
-  );
-  const closeIcon = iconNode(
-    "pcb-toggle-icon pcb-toggle-icon--close",
-    "M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z"
-  );
-
-  const badge = createElement("span", "pcb-badge pcb-hidden", {
-    "aria-live": "polite",
-    "aria-label": "Unread messages",
-  });
-  badge.textContent = "0";
-
-  toggleButton.appendChild(chatIcon);
-  toggleButton.appendChild(closeIcon);
-  toggleButton.appendChild(badge);
-
-  const panel = createElement("section", "pcb-panel", { "aria-label": "Chat panel" });
-  const header = createElement("div", "pcb-header");
-  const headerLeft = createElement("div", "pcb-header-left");
-  const avatar = createElement("div", "pcb-avatar");
-  avatar.textContent = config.botInitials;
-
-  const headerText = createElement("div", "pcb-header-text");
-  const headerName = createElement("p", "pcb-header-name");
-  headerName.textContent = config.botName;
-  const headerStatus = createElement("p", "pcb-header-status");
-  headerStatus.textContent = config.testMode ? "Test mode" : config.subtitle;
-  headerText.appendChild(headerName);
-  headerText.appendChild(headerStatus);
-  headerLeft.appendChild(avatar);
-  headerLeft.appendChild(headerText);
-
-  const headerActions = createElement("div", "");
-  headerActions.style.display = "flex";
-  headerActions.style.gap = "6px";
-
-  const clearButton = createElement("button", "pcb-header-btn", {
-    type: "button",
-    "aria-label": "Clear conversation",
-    title: "Clear conversation",
-  });
-  clearButton.appendChild(iconNode("", "M5 5h14v2H5V5Zm1 4h12l-1 11H7L6 9Zm4-6h4l1 1h4v2H5V4h4l1-1Z"));
-
-  const closeButton = createElement("button", "pcb-header-btn", {
-    type: "button",
-    "aria-label": "Close chat",
-    title: "Close chat",
-  });
-  closeButton.appendChild(iconNode("", "M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z"));
-
-  headerActions.appendChild(clearButton);
-  headerActions.appendChild(closeButton);
-  header.appendChild(headerLeft);
-  header.appendChild(headerActions);
-
-  const messages = createElement("div", "pcb-messages");
-
-  const typing = createElement("div", "pcb-typing pcb-hidden");
-  const typingAvatar = createElement("div", "pcb-msg-avatar");
-  typingAvatar.textContent = config.botInitials;
-  const typingBubble = createElement("div", "pcb-typing-bubble");
-  typingBubble.appendChild(createElement("span", "pcb-typing-dot"));
-  typingBubble.appendChild(createElement("span", "pcb-typing-dot"));
-  typingBubble.appendChild(createElement("span", "pcb-typing-dot"));
-  typing.appendChild(typingAvatar);
-  typing.appendChild(typingBubble);
-
-  const quickReplies = createElement("div", "pcb-quick-replies");
-
-  const resources = createElement("div", "pcb-resources pcb-hidden");
-  const resourcesLabel = createElement("div", "pcb-resources-label");
-  resourcesLabel.textContent = "Helpful store links";
-  const resourcesList = createElement("div", "pcb-resources-list");
-  resources.appendChild(resourcesLabel);
-  resources.appendChild(resourcesList);
-
-  const inputRow = createElement("div", "pcb-input-row");
-  const input = createElement("input", "pcb-input", {
-    type: "text",
-    placeholder: "Ask about order, product, discount, shipping...",
-    maxlength: "400",
-    "aria-label": "Message",
-  });
-  const sendButton = createElement("button", "pcb-send", { type: "button", "aria-label": "Send message" });
-  sendButton.appendChild(iconNode("", "M2 21 23 12 2 3v7l15 2-15 2z"));
-  inputRow.appendChild(input);
-  inputRow.appendChild(sendButton);
-
-  const footer = createElement("div", "pcb-footer");
-  if (config.showPoweredBy) {
-    footer.textContent = "Powered by Chat Boat";
-  } else {
-    footer.classList.add("pcb-hidden");
   }
 
-  panel.appendChild(header);
-  panel.appendChild(messages);
-  panel.appendChild(typing);
-  panel.appendChild(quickReplies);
-  panel.appendChild(resources);
-  panel.appendChild(inputRow);
-  panel.appendChild(footer);
+  // ─── API fetch ──────────────────────────────────────────────────────────────
 
-  return {
-    toggleButton,
-    badge,
-    panel,
-    closeButton,
-    clearButton,
-    messages,
-    typing,
-    quickReplies,
-    resources,
-    resourcesList,
-    input,
-    sendButton,
-  };
-}
+  async function fetchBotReply(cfg, history, message) {
+    const endpoint = cfg.apiUrl
+      ? `${cfg.apiUrl}/api/chat`
+      : "/apps/product-chat-boat/api/chat";
 
-function renderMessages(container, history, botInitials, config) {
-  container.innerHTML = "";
-  history.forEach((entry) => {
-    const role = entry.role === "user" ? "user" : "bot";
-    const item = createElement("div", `pcb-msg-item pcb-msg-item--${role}`);
-    const row = createElement("div", `pcb-msg pcb-msg--${role}`);
-    const avatar = createElement("div", "pcb-msg-avatar");
-    avatar.textContent = role === "user" ? "Y" : botInitials;
+    const historyPayload = history
+      .filter((e) => e.role === "user" || e.role === "bot")
+      .slice(-10)
+      .map((e) => ({ role: e.role === "user" ? "user" : "assistant", content: e.text }));
 
-    const bubble = createElement("div", "pcb-bubble");
-    bubble.textContent = entry.text;
-    row.appendChild(avatar);
-    row.appendChild(bubble);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shop: cfg.shop,
+        message,
+        history: historyPayload,
+        sessionId: cfg.sessionId,
+        visitorId: cfg.visitorId,
+        sourcePage: window.location.href,
+        locale: document.documentElement.lang || "en",
+      }),
+    });
 
-    const meta = createElement("div", "pcb-msg-meta");
-    const time = createElement("span", "pcb-msg-time");
-    time.textContent = formatClock(entry.timestamp);
-    meta.appendChild(time);
-
-    item.appendChild(row);
-    item.appendChild(meta);
-
-    if (
-      role === "bot" &&
-      config?.showProductSlider !== false &&
-      Array.isArray(entry.products) &&
-      entry.products.length
-    ) {
-      const inlineProducts = createElement("div", "pcb-inline-products");
-      const inlineTrack = createElement(
-        "div",
-        "pcb-products-track pcb-inline-products-track",
-      );
-      const limit = Math.max(1, Number(config?.sliderLimit) || 5);
-      entry.products.slice(0, limit).forEach((product) => {
-        inlineTrack.appendChild(createProductCard(product, config));
-      });
-      inlineProducts.appendChild(inlineTrack);
-      item.appendChild(inlineProducts);
-    }
-
-    container.appendChild(item);
-  });
-}
-
-function renderQuickReplies(container, replies, onReply) {
-  container.innerHTML = "";
-  if (!replies.length) {
-    container.classList.add("pcb-hidden");
-    return;
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    return response.json();
   }
 
-  replies.forEach((replyText) => {
-    const chip = createElement("button", "pcb-chip", {
+  // ─── Default quick replies ───────────────────────────────────────────────────
+
+  const PCB_DEFAULT_QUICK_REPLIES = [
+    "Track my order",
+    "Search products",
+    "Discount offers",
+    "Shipping info",
+    "Return policy",
+  ];
+
+  // ─── Config ─────────────────────────────────────────────────────────────────
+
+  const pcbCache = { products: null, searchResults: new Map() };
+
+  function buildConfig(root) {
+    const d = root.dataset;
+    const color = sanitizeColor(d.color || "#008060");
+    const shop = (d.shop || window.location.hostname || "shop").toLowerCase();
+    const quickReplies = parseQuickReplies(d.quickReplies);
+    const visitorKey = `pcb-visitor:${shop}`;
+    const sessionKey = `pcb-session:${shop}`;
+    const visitorId = getOrCreateStorageValue(visitorKey, createVisitorId);
+    const sessionId = getOrCreateStorageValue(sessionKey, createSessionId);
+
+    return {
+      botName: (d.botName || "Shop Assistant").trim(),
+      subtitle: (d.subtitle || "Online now").trim(),
+      botInitials: getInitials(d.botName || "Shop Assistant"),
+      welcomeMessage: (d.welcome || "Hi! Ask me about products, pricing, or recommendations.").trim(),
+      primaryColor: color,
+      primaryColorDark: darkenColor(color, 20),
+      buttonSize: clampNumber(parseInt(d.btnSize || "56", 10), 44, 72, 56),
+      autoOpen: parseBoolean(d.autoOpen),
+      showOnMobile: d.showMobile !== undefined ? parseBoolean(d.showMobile) : true,
+      showProductSlider: d.showProductSlider !== undefined ? parseBoolean(d.showProductSlider) : true,
+      showComparePrice: d.showComparePrice !== undefined ? parseBoolean(d.showComparePrice) : true,
+      productClickTarget: String(d.productClickTarget || "same-tab").toLowerCase() === "new-tab" ? "_blank" : "_self",
+      sliderLimit: clampNumber(parseInt(d.sliderLimit || "5", 10), 1, 10, 5),
+      showPoweredBy: d.showPoweredBy !== undefined ? parseBoolean(d.showPoweredBy) : true,
+      testMode: parseBoolean(d.testMode),
+      shop,
+      apiUrl: normalizeApiBaseUrl(d.apiUrl),
+      quickReplies: quickReplies.length ? quickReplies : PCB_DEFAULT_QUICK_REPLIES,
+      storageKey: `pcb-history:${shop}`,
+      visitorKey,
+      sessionKey,
+      visitorId,
+      sessionId,
+    };
+  }
+
+  function applyTheme(root, config) {
+    root.style.setProperty("--pcb-color", config.primaryColor);
+    root.style.setProperty("--pcb-color-dark", config.primaryColorDark);
+    root.style.setProperty("--pcb-btn-size", `${config.buttonSize}px`);
+  }
+
+  // ─── Base UI rendering ───────────────────────────────────────────────────────
+
+  function renderBaseUI(config) {
+    const toggleButton = createElement("button", "pcb-toggle", {
       type: "button",
-      "aria-label": `Quick reply: ${replyText}`,
+      "aria-label": "Toggle chat widget",
+      "aria-expanded": "false",
     });
-    chip.textContent = replyText;
-    chip.addEventListener("click", () => {
-      void onReply(replyText);
-    });
-    container.appendChild(chip);
-  });
-  container.classList.remove("pcb-hidden");
-}
 
-function createProductCard(product, config) {
-  const productUrl = normalizeProductUrl(product.url, product.title);
-  const cardAttrs = {
-    href: productUrl,
-    title: product.title || "Product",
-    target: config?.productClickTarget || "_self",
-  };
-  if (cardAttrs.target === "_blank") {
-    cardAttrs.rel = "noopener noreferrer";
+    const chatIcon = iconNode(
+      "pcb-toggle-icon pcb-toggle-icon--chat",
+      "M12 3C7.03 3 3 6.58 3 11c0 2.12.94 4.05 2.47 5.49L5 21l4.1-2.23c.91.25 1.88.38 2.9.38 4.97 0 9-3.58 9-8s-4.03-8.15-9-8.15Zm-3.2 9.2a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm3.2 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm3.2 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Z",
+    );
+    const closeIcon = iconNode(
+      "pcb-toggle-icon pcb-toggle-icon--close",
+      "M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z",
+    );
+
+    const badge = createElement("span", "pcb-badge pcb-hidden", {
+      "aria-live": "polite",
+      "aria-label": "Unread messages",
+    });
+    badge.textContent = "0";
+
+    toggleButton.appendChild(chatIcon);
+    toggleButton.appendChild(closeIcon);
+    toggleButton.appendChild(badge);
+
+    const panel = createElement("section", "pcb-panel", { "aria-label": "Chat panel" });
+    const header = createElement("div", "pcb-header");
+    const headerLeft = createElement("div", "pcb-header-left");
+    const avatar = createElement("div", "pcb-avatar");
+    avatar.textContent = config.botInitials;
+
+    const headerText = createElement("div", "pcb-header-text");
+    const headerName = createElement("p", "pcb-header-name");
+    headerName.textContent = config.botName;
+    const headerStatus = createElement("p", "pcb-header-status");
+    headerStatus.textContent = config.testMode ? "Test mode" : config.subtitle;
+    headerText.appendChild(headerName);
+    headerText.appendChild(headerStatus);
+    headerLeft.appendChild(avatar);
+    headerLeft.appendChild(headerText);
+
+    const headerActions = createElement("div", "");
+    headerActions.style.cssText = "display:flex;gap:6px";
+
+    const clearButton = createElement("button", "pcb-header-btn", {
+      type: "button",
+      "aria-label": "Clear conversation",
+      title: "Clear conversation",
+    });
+    clearButton.appendChild(
+      iconNode("", "M5 5h14v2H5V5Zm1 4h12l-1 11H7L6 9Zm4-6h4l1 1h4v2H5V4h4l1-1Z"),
+    );
+
+    const closeButton = createElement("button", "pcb-header-btn", {
+      type: "button",
+      "aria-label": "Close chat",
+      title: "Close chat",
+    });
+    closeButton.appendChild(
+      iconNode("", "M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.3-6.3z"),
+    );
+
+    headerActions.appendChild(clearButton);
+    headerActions.appendChild(closeButton);
+    header.appendChild(headerLeft);
+    header.appendChild(headerActions);
+
+    const messages = createElement("div", "pcb-messages");
+
+    const typing = createElement("div", "pcb-typing pcb-hidden");
+    const typingAvatar = createElement("div", "pcb-msg-avatar");
+    typingAvatar.textContent = config.botInitials;
+    const typingBubble = createElement("div", "pcb-typing-bubble");
+    typingBubble.appendChild(createElement("span", "pcb-typing-dot"));
+    typingBubble.appendChild(createElement("span", "pcb-typing-dot"));
+    typingBubble.appendChild(createElement("span", "pcb-typing-dot"));
+    typing.appendChild(typingAvatar);
+    typing.appendChild(typingBubble);
+
+    const quickReplies = createElement("div", "pcb-quick-replies");
+
+    const resources = createElement("div", "pcb-resources pcb-hidden");
+    const resourcesLabel = createElement("div", "pcb-resources-label");
+    resourcesLabel.textContent = "Helpful store links";
+    const resourcesList = createElement("div", "pcb-resources-list");
+    resources.appendChild(resourcesLabel);
+    resources.appendChild(resourcesList);
+
+    const inputRow = createElement("div", "pcb-input-row");
+    const input = createElement("input", "pcb-input", {
+      type: "text",
+      placeholder: "Ask about order, product, discount, shipping...",
+      maxlength: "400",
+      "aria-label": "Message",
+    });
+    const sendButton = createElement("button", "pcb-send", {
+      type: "button",
+      "aria-label": "Send message",
+    });
+    sendButton.appendChild(iconNode("", "M2 21 23 12 2 3v7l15 2-15 2z"));
+    inputRow.appendChild(input);
+    inputRow.appendChild(sendButton);
+
+    const footer = createElement("div", "pcb-footer");
+    if (config.showPoweredBy) {
+      footer.textContent = "Powered by Chat Boat";
+    } else {
+      footer.classList.add("pcb-hidden");
+    }
+
+    panel.appendChild(header);
+    panel.appendChild(messages);
+    panel.appendChild(typing);
+    panel.appendChild(quickReplies);
+    panel.appendChild(resources);
+    panel.appendChild(inputRow);
+    panel.appendChild(footer);
+
+    return {
+      toggleButton,
+      badge,
+      panel,
+      closeButton,
+      clearButton,
+      messages,
+      typing,
+      quickReplies,
+      resources,
+      resourcesList,
+      input,
+      sendButton,
+    };
   }
-  const card = createElement("a", "pcb-product-card", cardAttrs);
 
-  if (product.image) {
-    const image = createElement("img", "pcb-product-img", {
-      src: product.image,
-      alt: product.title || "Product image",
-      loading: "lazy",
+  // ─── Message rendering ───────────────────────────────────────────────────────
+
+  function renderMessages(container, history, botInitials, config) {
+    container.innerHTML = "";
+    history.forEach((entry) => {
+      const role = entry.role === "user" ? "user" : "bot";
+      const item = createElement("div", `pcb-msg-item pcb-msg-item--${role}`);
+      const row = createElement("div", `pcb-msg pcb-msg--${role}`);
+      const avatar = createElement("div", "pcb-msg-avatar");
+      avatar.textContent = role === "user" ? "Y" : botInitials;
+
+      const bubble = createElement("div", "pcb-bubble");
+      bubble.innerHTML = renderMarkdownLight(entry.text);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+
+      const meta = createElement("div", "pcb-msg-meta");
+      const time = createElement("span", "pcb-msg-time");
+      time.textContent = formatClock(entry.timestamp);
+      meta.appendChild(time);
+
+      item.appendChild(row);
+      item.appendChild(meta);
+
+      // Render rich cards based on message type
+      if (role === "bot" && entry.type && entry.type !== "text") {
+        const card = renderRichCard(entry.type, entry.data, entry.products, config);
+        if (card) {
+          const cardWrapper = createElement("div", "pcb-card-wrapper");
+          cardWrapper.appendChild(card);
+          item.appendChild(cardWrapper);
+        }
+      } else if (role === "bot" && Array.isArray(entry.products) && entry.products.length > 0) {
+        // Legacy product slider
+        const slider = renderProductSlider(entry.products, config);
+        if (slider) {
+          const sliderWrapper = createElement("div", "pcb-inline-products");
+          sliderWrapper.appendChild(slider);
+          item.appendChild(sliderWrapper);
+        }
+      }
+
+      container.appendChild(item);
     });
-    card.appendChild(image);
-  } else {
-    const placeholder = createElement("div", "pcb-product-img-placeholder");
-    placeholder.textContent = "P";
-    card.appendChild(placeholder);
   }
 
-  const info = createElement("div", "pcb-product-info");
-  const title = createElement("div", "pcb-product-title");
-  title.textContent = product.title || "Product";
-  info.appendChild(title);
+  // ─── Rich card router ────────────────────────────────────────────────────────
 
-  if (product.price || (config?.showComparePrice && product.comparePrice)) {
-    const pricing = createElement("div", "pcb-product-pricing");
-    if (product.price) {
-      const price = createElement("div", "pcb-product-price");
-      price.textContent = product.price;
+  function renderRichCard(type, data, products, config) {
+    switch (type) {
+      case "order_status":
+        return data ? renderOrderStatusCard(data) : null;
+      case "product_cards":
+        return (data?.products?.length || products?.length)
+          ? renderProductCards(data?.products || products, config)
+          : null;
+      case "coupon_result":
+        return data ? renderCouponCard(data) : null;
+      case "discount_list":
+        return data?.discounts?.length ? renderDiscountList(data.discounts) : null;
+      case "shipping_info":
+        return data?.items?.length ? renderShippingInfoCard(data) : null;
+      case "gift_products":
+        return data ? renderGiftProductsCard(data, config) : null;
+      case "cart_action":
+        return data ? renderCartActionCard(data) : null;
+      default:
+        if (Array.isArray(products) && products.length) {
+          return renderProductCards(products, config);
+        }
+        return null;
+    }
+  }
+
+  // ─── Order Status Card ───────────────────────────────────────────────────────
+
+  function renderOrderStatusCard(order) {
+    const card = createElement("div", "pcb-order-card");
+
+    // Header row
+    const header = createElement("div", "pcb-order-header");
+    const orderName = createElement("span", "pcb-order-name");
+    orderName.textContent = order.orderName || "Order";
+    const stageBadge = createElement("span", `pcb-order-stage ${order.stageClass || "pcb-stage--processing"}`);
+    stageBadge.textContent = order.stage || "Processing";
+    header.appendChild(orderName);
+    header.appendChild(stageBadge);
+    card.appendChild(header);
+
+    // Order date
+    if (order.processedAtFormatted) {
+      const dateRow = createElement("div", "pcb-order-row");
+      dateRow.innerHTML = `<span class="pcb-order-label">Placed on</span><span class="pcb-order-value">${escHtml(order.processedAtFormatted)}</span>`;
+      card.appendChild(dateRow);
+    }
+
+    // Items
+    if (order.items?.length) {
+      const itemsSection = createElement("div", "pcb-order-items");
+      order.items.forEach((item) => {
+        const itemEl = createElement("div", "pcb-order-item-line");
+        itemEl.textContent = `${item.title} × ${item.quantity}`;
+        itemsSection.appendChild(itemEl);
+      });
+      card.appendChild(itemsSection);
+    }
+
+    // Total
+    if (order.total) {
+      const totalRow = createElement("div", "pcb-order-row");
+      totalRow.innerHTML = `<span class="pcb-order-label">Total</span><span class="pcb-order-value pcb-order-total">${escHtml(order.currency || "INR")} ${escHtml(order.total)}</span>`;
+      card.appendChild(totalRow);
+    }
+
+    // Tracking
+    if (order.trackingNumber) {
+      const trackRow = createElement("div", "pcb-order-tracking");
+      const trackLabel = createElement("div", "pcb-order-tracking-info");
+      trackLabel.innerHTML = `<span class="pcb-order-label">Tracking</span><span class="pcb-order-value">${escHtml(order.trackingNumber)}${order.trackingCompany ? ` (${escHtml(order.trackingCompany)})` : ""}</span>`;
+      trackRow.appendChild(trackLabel);
+
+      if (order.trackingUrl) {
+        const trackBtn = createElement("a", "pcb-order-track-btn", {
+          href: order.trackingUrl,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        });
+        trackBtn.textContent = "Track Shipment →";
+        trackRow.appendChild(trackBtn);
+      }
+      card.appendChild(trackRow);
+    }
+
+    // ETA / Delivered
+    if (order.deliveredAtFormatted) {
+      const etaRow = createElement("div", "pcb-order-row pcb-order-delivered");
+      etaRow.innerHTML = `<span>✅ Delivered on ${escHtml(order.deliveredAtFormatted)}</span>`;
+      card.appendChild(etaRow);
+    } else if (order.estimatedDeliveryFormatted) {
+      const etaRow = createElement("div", "pcb-order-row");
+      etaRow.innerHTML = `<span class="pcb-order-label">Estimated delivery</span><span class="pcb-order-value">${escHtml(order.estimatedDeliveryFormatted)}</span>`;
+      card.appendChild(etaRow);
+    }
+
+    return card;
+  }
+
+  // ─── Product Cards (grid / slider) ──────────────────────────────────────────
+
+  function renderProductCards(products, config) {
+    if (!Array.isArray(products) || !products.length) return null;
+
+    const wrapper = createElement("div", "pcb-product-cards-wrapper");
+    const label = createElement("div", "pcb-products-label");
+    label.textContent = "Products";
+    wrapper.appendChild(label);
+
+    const track = createElement("div", "pcb-products-track");
+
+    products.forEach((p) => {
+      const href = normalizeProductUrl(p.url, p.title);
+      const card = createElement("div", "pcb-product-card");
+
+      // Image
+      if (p.image) {
+        const img = createElement("img", "pcb-product-img", {
+          src: p.image,
+          alt: p.imageAlt || p.title || "Product",
+          loading: "lazy",
+        });
+        card.appendChild(img);
+      } else {
+        const placeholder = createElement("div", "pcb-product-img-placeholder");
+        placeholder.textContent = (p.title || "?").charAt(0).toUpperCase();
+        card.appendChild(placeholder);
+      }
+
+      // Info
+      const info = createElement("div", "pcb-product-info");
+
+      const title = createElement("p", "pcb-product-title");
+      title.textContent = p.title || "Product";
+      info.appendChild(title);
+
+      // Stock badge
+      const stockBadge = createElement("span", p.available !== false ? "pcb-stock-badge pcb-stock-in" : "pcb-stock-badge pcb-stock-out");
+      stockBadge.textContent = p.available !== false ? "In Stock" : "Sold Out";
+      info.appendChild(stockBadge);
+
+      // Pricing
+      const pricing = createElement("div", "pcb-product-pricing");
+      const price = createElement("span", "pcb-product-price");
+      price.textContent = formatMoneyAmount(p.price, p.currency);
       pricing.appendChild(price);
-    }
-    if (config?.showComparePrice && product.comparePrice) {
-      const compare = createElement("div", "pcb-product-compare");
-      compare.textContent = product.comparePrice;
-      pricing.appendChild(compare);
-    }
-    info.appendChild(pricing);
-  }
-  card.appendChild(info);
 
-  const cta = createElement("span", "pcb-product-btn");
-  cta.textContent = "View product";
-  card.appendChild(cta);
+      if (p.comparePrice && parseFloat(p.comparePrice) > parseFloat(p.price)) {
+        const compare = createElement("span", "pcb-product-compare");
+        compare.textContent = formatMoneyAmount(p.comparePrice, p.currency);
+        pricing.appendChild(compare);
 
-  return card;
-}
+        const savePct = Math.round(
+          ((parseFloat(p.comparePrice) - parseFloat(p.price)) /
+            parseFloat(p.comparePrice)) *
+            100,
+        );
+        if (savePct > 0) {
+          const saveBadge = createElement("span", "pcb-discount-badge");
+          saveBadge.textContent = `-${savePct}%`;
+          pricing.appendChild(saveBadge);
+        }
+      }
+      info.appendChild(pricing);
+      card.appendChild(info);
 
-function renderResources(list, resources) {
-  list.innerHTML = "";
-  const parent = list.parentElement;
-  if (!parent) {
-    return;
-  }
+      // Action buttons
+      const actions = createElement("div", "pcb-product-actions");
 
-  if (!resources.length) {
-    parent.classList.add("pcb-hidden");
-    return;
-  }
+      const viewBtn = createElement("a", "pcb-product-btn pcb-btn-view", {
+        href,
+        target: config.productClickTarget || "_self",
+      });
+      viewBtn.textContent = "View";
+      actions.appendChild(viewBtn);
 
-  resources.forEach((resource) => {
-    const card = createElement("a", "pcb-resource-card", {
-      href: resource.url || "#",
-      title: resource.title || "Store link",
+      if (p.available !== false) {
+        const cartBtn = createElement("button", "pcb-product-btn pcb-btn-cart", {
+          type: "button",
+          "data-variant-id": p.variantId || "",
+          "data-product-url": href,
+        });
+        cartBtn.textContent = "Add to Cart";
+        cartBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          handleAddToCart(p, cartBtn);
+        });
+        actions.appendChild(cartBtn);
+
+        const buyBtn = createElement("a", "pcb-product-btn pcb-btn-buy", {
+          href: p.variantId
+            ? `/cart/${p.variantId.replace("gid://shopify/ProductVariant/", "")}:1?checkout`
+            : `${href}`,
+          target: "_self",
+        });
+        buyBtn.textContent = "Buy Now";
+        actions.appendChild(buyBtn);
+      }
+
+      card.appendChild(actions);
+      track.appendChild(card);
     });
 
-    const top = createElement("div", "pcb-resource-top");
-    const title = createElement("div", "pcb-resource-title");
-    title.textContent = resource.title || "Store link";
-    const type = createElement("span", "pcb-resource-type");
-    type.textContent = resource.type || "Info";
-    top.appendChild(title);
-    top.appendChild(type);
-
-    card.appendChild(top);
-
-    if (resource.description) {
-      const description = createElement("div", "pcb-resource-desc");
-      description.textContent = resource.description;
-      card.appendChild(description);
-    }
-
-    list.appendChild(card);
-  });
-
-  parent.classList.remove("pcb-hidden");
-}
-
-async function fetchBotReply(config, history, userText) {
-  if (config.apiUrl) {
-    const apiReply = await requestReplyFromApi(config, history, userText);
-    if (apiReply) {
-      return apiReply;
-    }
+    wrapper.appendChild(track);
+    return wrapper;
   }
 
-  return fallbackReply(userText);
-}
+  async function handleAddToCart(product, btn) {
+    const variantNumericId = (product.variantId || "").replace(
+      "gid://shopify/ProductVariant/",
+      "",
+    );
+    if (!variantNumericId) {
+      window.location.href = product.url || "/collections/all";
+      return;
+    }
 
-async function requestReplyFromApi(config, history, userText) {
-  const endpoints = buildCandidateEndpoints(config.apiUrl);
-  const payload = {
-    shop: config.shop,
-    message: userText,
-    history: history.slice(-12),
-    source: "storefront-widget",
-    sourcePage: window.location.pathname,
-    locale:
-      document.documentElement.getAttribute("lang") ||
-      navigator.language ||
-      "en",
-    sessionId: config.sessionId,
-    visitorId: config.visitorId,
-  };
+    const originalText = btn.textContent;
+    btn.textContent = "Adding...";
+    btn.disabled = true;
 
-  for (const url of endpoints) {
     try {
-      const response = await fetch(url, {
+      const res = await fetch("/cart/add.js", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ id: parseInt(variantNumericId), quantity: 1 }),
+      });
+      if (res.ok) {
+        btn.textContent = "✓ Added!";
+        btn.classList.add("pcb-btn-added");
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.disabled = false;
+          btn.classList.remove("pcb-btn-added");
+        }, 2000);
+      } else {
+        throw new Error("Cart add failed");
+      }
+    } catch (_e) {
+      btn.textContent = "View →";
+      btn.disabled = false;
+      btn.addEventListener(
+        "click",
+        () => {
+          window.location.href = product.url || "/collections/all";
+        },
+        { once: true },
+      );
+    }
+  }
+
+  // ─── Coupon Card ─────────────────────────────────────────────────────────────
+
+  function renderCouponCard(data) {
+    const card = createElement("div", `pcb-coupon-card ${data.valid ? "pcb-coupon-valid" : "pcb-coupon-invalid"}`);
+
+    const statusRow = createElement("div", "pcb-coupon-status-row");
+    const statusIcon = createElement("span", "pcb-coupon-status-icon");
+    statusIcon.textContent = data.valid ? "✓" : "✗";
+    const statusText = createElement("span", "pcb-coupon-status-text");
+    statusText.textContent = data.valid ? "Coupon Valid" : "Invalid Coupon";
+    statusRow.appendChild(statusIcon);
+    statusRow.appendChild(statusText);
+    card.appendChild(statusRow);
+
+    if (data.code) {
+      const codeEl = createElement("div", "pcb-coupon-code-display");
+      codeEl.textContent = data.code;
+      card.appendChild(codeEl);
+    }
+
+    if (data.valid) {
+      const valueEl = createElement("div", "pcb-coupon-value");
+      valueEl.textContent = data.valueLabel || "";
+      card.appendChild(valueEl);
+
+      if (data.minimumCartFormatted) {
+        const minEl = createElement("div", "pcb-coupon-min");
+        minEl.textContent = `Min. cart value: ${data.minimumCartFormatted}`;
+        card.appendChild(minEl);
+      }
+
+      if (data.endsAt) {
+        const expiryEl = createElement("div", "pcb-coupon-expiry");
+        expiryEl.textContent = `Valid till: ${new Date(data.endsAt).toLocaleDateString("en-IN")}`;
+        card.appendChild(expiryEl);
+      }
+
+      const copyBtn = createElement("button", "pcb-coupon-copy-btn", { type: "button" });
+      copyBtn.textContent = "Copy Code";
+      copyBtn.addEventListener("click", () => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(data.code).catch(() => {});
+        }
+        copyBtn.textContent = "✓ Copied!";
+        setTimeout(() => (copyBtn.textContent = "Copy Code"), 2000);
+      });
+      card.appendChild(copyBtn);
+    } else {
+      const reasonEl = createElement("div", "pcb-coupon-reason");
+      reasonEl.textContent = data.reason || "This coupon is not valid";
+      card.appendChild(reasonEl);
+    }
+
+    return card;
+  }
+
+  // ─── Discount List Card ───────────────────────────────────────────────────────
+
+  function renderDiscountList(discounts) {
+    const wrapper = createElement("div", "pcb-discount-list");
+    const label = createElement("div", "pcb-discount-list-label");
+    label.textContent = "Active Offers";
+    wrapper.appendChild(label);
+
+    discounts.forEach((d) => {
+      const item = createElement("div", "pcb-discount-item");
+
+      const codeEl = createElement("span", "pcb-discount-code");
+      codeEl.textContent = d.code;
+      item.appendChild(codeEl);
+
+      const valueEl = createElement("span", "pcb-discount-value-badge");
+      valueEl.textContent = d.valueLabel;
+      item.appendChild(valueEl);
+
+      if (d.minimumCartFormatted) {
+        const minEl = createElement("span", "pcb-discount-min-label");
+        minEl.textContent = `Min. ${d.minimumCartFormatted}`;
+        item.appendChild(minEl);
+      }
+
+      const copyBtn = createElement("button", "pcb-discount-copy-btn", { type: "button" });
+      copyBtn.textContent = "Copy";
+      copyBtn.addEventListener("click", () => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(d.code).catch(() => {});
+        }
+        copyBtn.textContent = "✓";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 2000);
+      });
+      item.appendChild(copyBtn);
+
+      wrapper.appendChild(item);
+    });
+
+    return wrapper;
+  }
+
+  // ─── Shipping Info Card ───────────────────────────────────────────────────────
+
+  function renderShippingInfoCard(data) {
+    const card = createElement("div", "pcb-shipping-card");
+
+    if (Array.isArray(data.items)) {
+      data.items.forEach((row) => {
+        const itemEl = createElement("div", "pcb-shipping-row");
+        const iconEl = createElement("span", "pcb-shipping-icon");
+        iconEl.textContent = row.icon || "📦";
+        const labelEl = createElement("span", "pcb-shipping-label");
+        labelEl.textContent = row.label || "";
+        const valueEl = createElement("span", "pcb-shipping-value");
+        valueEl.textContent = row.value || "";
+        itemEl.appendChild(iconEl);
+        itemEl.appendChild(labelEl);
+        itemEl.appendChild(valueEl);
+        card.appendChild(itemEl);
+      });
+    }
+
+    return card;
+  }
+
+  // ─── Gift Products Card ───────────────────────────────────────────────────────
+
+  function renderGiftProductsCard(data, config) {
+    const wrapper = createElement("div", "pcb-gift-card");
+
+    if (data.threshold) {
+      const banner = createElement("div", "pcb-gift-banner");
+      banner.innerHTML = `🎁 <strong>Add items worth ${escHtml(data.thresholdFormatted || `₹${data.threshold}`)}</strong> to unlock a FREE gift!`;
+      wrapper.appendChild(banner);
+    }
+
+    if (Array.isArray(data.products) && data.products.length) {
+      const giftProductsEl = renderProductCards(data.products, config);
+      if (giftProductsEl) wrapper.appendChild(giftProductsEl);
+    }
+
+    if (data.instructions) {
+      const instrEl = createElement("div", "pcb-gift-instructions");
+      instrEl.textContent = data.instructions;
+      wrapper.appendChild(instrEl);
+    }
+
+    return wrapper;
+  }
+
+  // ─── Cart Action Card ─────────────────────────────────────────────────────────
+
+  function renderCartActionCard(data) {
+    const card = createElement("div", "pcb-cart-card");
+
+    const msgEl = createElement("p", "pcb-cart-message");
+    msgEl.textContent = data.message || "View your cart to proceed to checkout.";
+    card.appendChild(msgEl);
+
+    const btnRow = createElement("div", "pcb-cart-btn-row");
+
+    if (data.cartUrl) {
+      const cartBtn = createElement("a", "pcb-cart-btn pcb-cart-btn-secondary", {
+        href: data.cartUrl,
+      });
+      cartBtn.textContent = "View Cart";
+      btnRow.appendChild(cartBtn);
+    }
+
+    if (data.checkoutUrl) {
+      const checkoutBtn = createElement("a", "pcb-cart-btn pcb-cart-btn-primary", {
+        href: data.checkoutUrl,
+      });
+      checkoutBtn.textContent = "Checkout →";
+      btnRow.appendChild(checkoutBtn);
+    }
+
+    card.appendChild(btnRow);
+    return card;
+  }
+
+  // ─── Legacy product slider (for old history entries) ────────────────────────
+
+  function renderProductSlider(products, config) {
+    if (!products || !products.length) return null;
+    const track = createElement("div", "pcb-inline-products-track");
+    products.forEach((p) => {
+      const href = normalizeProductUrl(p.url, p.title);
+      const card = createElement("a", "pcb-product-card", {
+        href,
+        target: config.productClickTarget || "_self",
       });
 
-      if (!response.ok) {
-        continue;
+      if (p.image) {
+        const img = createElement("img", "pcb-product-img", {
+          src: p.image,
+          alt: p.title || "Product",
+          loading: "lazy",
+        });
+        card.appendChild(img);
+      } else {
+        const ph = createElement("div", "pcb-product-img-placeholder");
+        ph.textContent = (p.title || "?").charAt(0).toUpperCase();
+        card.appendChild(ph);
       }
 
-      const data = await response.json();
-      const text = normalizeReplyText(data);
-      if (!text) {
-        continue;
+      const info = createElement("div", "pcb-product-info");
+      const title = createElement("p", "pcb-product-title");
+      title.textContent = p.title || "Product";
+      info.appendChild(title);
+
+      if (p.price) {
+        const pricing = createElement("div", "pcb-product-pricing");
+        const price = createElement("span", "pcb-product-price");
+        price.textContent = p.price;
+        pricing.appendChild(price);
+        if (p.comparePrice) {
+          const compare = createElement("span", "pcb-product-compare");
+          compare.textContent = p.comparePrice;
+          pricing.appendChild(compare);
+        }
+        info.appendChild(pricing);
       }
 
-      return {
-        text,
-        products: normalizeProducts(data.products || data.recommendations || []),
-        resources: normalizeResources(data.resources || data.links || []),
-      };
-    } catch (_error) {
-      continue;
-    }
-  }
+      card.appendChild(info);
 
-  return null;
-}
+      const viewBtn = createElement("div", "pcb-product-btn");
+      viewBtn.textContent = "View →";
+      card.appendChild(viewBtn);
 
-async function safeFallbackReply(userText) {
-  try {
-    const reply = await fallbackReply(userText);
-    if (reply && reply.text) {
-      return reply;
-    }
-  } catch (_error) {
-    // Ignore and return a deterministic emergency reply below.
-  }
-
-  const query = String(userText || "").trim();
-  return {
-    text: query
-      ? `I could not process "${query}" right now. Try asking about products, discounts, shipping, or order tracking.`
-      : "I could not process that right now. Try asking about products, discounts, shipping, or order tracking.",
-    products: [],
-    resources: [],
-  };
-}
-
-async function resolveProductsForSlider(userText, replyProducts, config) {
-  const sliderEnabled = config?.showProductSlider !== false;
-  if (!sliderEnabled) {
-    return [];
-  }
-
-  const limit = Math.max(1, Number(config?.sliderLimit) || 5);
-  const query = String(userText || "").trim();
-  const normalizedReplyProducts = normalizeProducts(
-    Array.isArray(replyProducts) ? replyProducts : [],
-  );
-
-  if (normalizedReplyProducts.length >= limit) {
-    return normalizedReplyProducts.slice(0, limit);
-  }
-
-  const related = query ? await searchStorefrontProducts(query) : [];
-  let merged = mergeUniqueProducts(normalizedReplyProducts, related, limit);
-
-  if (merged.length < limit) {
-    merged = mergeUniqueProducts(merged, await getTopProducts(), limit);
-  }
-
-  return merged;
-}
-
-function mergeUniqueProducts(primaryProducts, secondaryProducts, limit) {
-  const output = [];
-  const seen = new Set();
-  const max = Math.max(1, Number(limit) || 5);
-
-  const pushUnique = (product) => {
-    if (!product || !product.title) {
-      return;
-    }
-    const key = String(product.url || product.title).toLowerCase();
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    output.push(product);
-  };
-
-  (primaryProducts || []).forEach(pushUnique);
-  (secondaryProducts || []).forEach(pushUnique);
-  return output.slice(0, max);
-}
-
-function buildCandidateEndpoints(baseUrl) {
-  const normalized = String(baseUrl || "").replace(/\/+$/, "");
-  if (!normalized) {
-    return [];
-  }
-  if (/\/chat$/i.test(normalized)) {
-    return [normalized];
-  }
-  return [
-    `${normalized}/apps/chatboat/chat`,
-    `${normalized}/api/chat`,
-    `${normalized}/chat`,
-  ];
-}
-
-async function fallbackReply(userText) {
-  const query = String(userText || "").trim();
-  const intent = detectIntent(query);
-
-  if (intent === "order") {
-    return orderTrackingReply();
-  }
-  if (intent === "discount") {
-    return discountReply(query);
-  }
-  if (intent === "shipping") {
-    return shippingReply();
-  }
-  if (intent === "store") {
-    return storeSearchReply(query);
-  }
-  if (intent === "product") {
-    return productReply(query);
-  }
-
-  return generalSearchReply(query);
-}
-
-function detectIntent(text) {
-  const query = String(text || "").toLowerCase();
-  if (matchesAny(query, ["order", "track", "tracking", "where is my order", "awb"])) {
-    return "order";
-  }
-  if (matchesAny(query, ["discount", "coupon", "promo", "offer", "sale", "% off"])) {
-    return "discount";
-  }
-  if (matchesAny(query, ["shipping", "delivery", "dispatch", "courier", "eta"])) {
-    return "shipping";
-  }
-  if (matchesAny(query, ["policy", "return", "refund", "contact", "about", "store", "faq"])) {
-    return "store";
-  }
-  if (matchesAny(query, ["product", "search", "find", "show", "buy", "item", "collection"])) {
-    return "product";
-  }
-  return "general";
-}
-
-async function orderTrackingReply() {
-  const resources = await collectKnownResources([
-    { title: "Track your order", type: "Tracking", paths: ["/pages/track-order", "/pages/order-tracking", "/pages/track"] },
-    { title: "Your account orders", type: "Account", paths: ["/account"] },
-    { title: "Contact support", type: "Support", paths: ["/pages/contact", "/contact"] },
-  ]);
-
-  return {
-    text: resources.length
-      ? "Use the links below to track your order and get latest shipping status."
-      : "Please log in to your account orders page or contact support with your order number.",
-    products: [],
-    resources,
-  };
-}
-
-async function productReply(query) {
-  const products = await searchStorefrontProducts(query);
-  if (products.length) {
-    return {
-      text: `I found ${products.length} products for "${query}".`,
-      products,
-      resources: [],
-    };
-  }
-
-  return {
-    text: "I could not find an exact match. Here are products from the store.",
-    products: await getTopProducts(),
-    resources: [],
-  };
-}
-
-async function discountReply(query) {
-  const products = await findDiscountedProducts(query);
-  const resources = await collectKnownResources([
-    { title: "View all products", type: "Catalog", paths: ["/collections/all"] },
-  ]);
-
-  if (products.length) {
-    return {
-      text: "I found discounted products currently available.",
-      products,
-      resources,
-    };
-  }
-
-  return {
-    text: "I could not detect discounted products right now from storefront data.",
-    products: [],
-    resources,
-  };
-}
-
-async function shippingReply() {
-  const resources = await collectKnownResources([
-    { title: "Shipping policy", type: "Policy", paths: ["/policies/shipping-policy"] },
-    { title: "Return policy", type: "Policy", paths: ["/policies/refund-policy", "/policies/return-policy"] },
-    { title: "Contact support", type: "Support", paths: ["/pages/contact", "/contact"] },
-  ]);
-  const snippet = await fetchPolicySnippet("/policies/shipping-policy");
-
-  return {
-    text: snippet
-      ? `Shipping details: ${snippet}`
-      : "Shipping timelines depend on location and courier. Open shipping policy for full details.",
-    products: [],
-    resources,
-  };
-}
-
-async function storeSearchReply(query) {
-  const results = await searchStorefrontResources(query);
-  if (results.products.length || results.resources.length) {
-    return {
-      text: `I found store results for "${query}".`,
-      products: results.products,
-      resources: results.resources,
-    };
-  }
-
-  return {
-    text: "No exact store result found. Try keywords like return policy, contact, or shipping.",
-    products: [],
-    resources: await collectKnownResources([
-      { title: "Contact us", type: "Support", paths: ["/pages/contact", "/contact"] },
-      { title: "All collections", type: "Catalog", paths: ["/collections/all"] },
-    ]),
-  };
-}
-
-async function generalSearchReply(query) {
-  if (!query) {
-    return {
-      text: "Ask me about order tracking, products, discounts, shipping, or store policies.",
-      products: [],
-      resources: [],
-    };
-  }
-
-  const results = await searchStorefrontResources(query);
-  if (results.products.length || results.resources.length) {
-    return {
-      text: `Here is what I found for "${query}".`,
-      products: results.products,
-      resources: results.resources,
-    };
-  }
-
-  return {
-    text: "I could not find relevant results. Try a more specific query.",
-    products: [],
-    resources: [],
-  };
-}
-
-async function searchStorefrontResources(queryText) {
-  const query = String(queryText || "").trim();
-  if (!query) {
-    return { products: [], resources: [] };
-  }
-
-  const key = query.toLowerCase();
-  if (pcbCache.searchResults.has(key)) {
-    return pcbCache.searchResults.get(key);
-  }
-
-  try {
-    const url = `/search/suggest.json?q=${encodeURIComponent(query)}&resources[type]=product,page,collection,article&resources[limit]=6&resources[options][unavailable_products]=last`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const fallback = { products: await searchStorefrontProducts(query), resources: [] };
-      pcbCache.searchResults.set(key, fallback);
-      return fallback;
-    }
-
-    const data = await response.json();
-    const results = data && data.resources && data.resources.results ? data.resources.results : {};
-    const products = normalizePredictiveProducts(results.products || []).slice(0, 5);
-    const pages = normalizeLinkResources(results.pages || [], "Page");
-    const collections = normalizeLinkResources(results.collections || [], "Collection");
-    const articles = normalizeLinkResources(results.articles || [], "Article");
-    const shaped = {
-      products,
-      resources: [...pages, ...collections, ...articles].slice(0, 6),
-    };
-
-    pcbCache.searchResults.set(key, shaped);
-    return shaped;
-  } catch (_error) {
-    const fallback = { products: await searchStorefrontProducts(query), resources: [] };
-    pcbCache.searchResults.set(key, fallback);
-    return fallback;
-  }
-}
-
-function normalizePredictiveProducts(rawProducts) {
-  if (!Array.isArray(rawProducts)) {
-    return [];
-  }
-
-  return rawProducts.map((item) => {
-    const minPrice = item && item.price ? item.price.min_variant_price : null;
-    const compareAt = item && item.price ? item.price.compare_at_price : null;
-    const price = minPrice && minPrice.amount
-      ? formatMoneyAmount(minPrice.amount, minPrice.currency_code)
-      : normalizePriceValue(item && (item.price || item.formattedPrice));
-    const comparePrice = compareAt && compareAt.amount
-      ? formatMoneyAmount(compareAt.amount, compareAt.currency_code || minPrice?.currency_code)
-      : normalizePriceValue(item && (item.compare_at_price || item.comparePrice || item.compareAtPrice));
-    const productUrl = normalizeProductUrl(
-      item && (item.url || item.link || item.online_store_url || item.handle),
-      item && item.title,
-    );
-    return {
-      title: item.title || "Product",
-      url: productUrl,
-      image: item.featured_image && item.featured_image.url ? item.featured_image.url : "",
-      price,
-      comparePrice,
-    };
-  });
-}
-
-function normalizeLinkResources(items, type) {
-  if (!Array.isArray(items)) {
-    return [];
-  }
-
-  return items.map((item) => ({
-    title: item.title || type,
-    url: item.url || "#",
-    type,
-    description: "Open details",
-  }));
-}
-
-async function getTopProducts() {
-  const products = await fetchStoreProducts();
-  return products.slice(0, 5).map((product) => normalizeStorefrontProduct(product));
-}
-
-async function searchStorefrontProducts(queryText) {
-  const query = String(queryText || "").trim();
-  const products = await fetchStoreProducts();
-  if (!products.length) {
-    return [];
-  }
-
-  if (!query) {
-    return products.slice(0, 5).map((product) => normalizeStorefrontProduct(product));
-  }
-
-  const tokens = tokenize(query);
-  if (!tokens.length) {
-    return [];
-  }
-
-  return products
-    .map((product) => ({
-      product,
-      score: scoreProduct(product, tokens),
-    }))
-    .filter((row) => row.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5)
-    .map((row) => normalizeStorefrontProduct(row.product));
-}
-
-async function findDiscountedProducts(queryText) {
-  const products = await fetchStoreProducts();
-  const tokens = tokenize(queryText || "");
-
-  return products
-    .map((product) => {
-      const variant = Array.isArray(product.variants) && product.variants.length ? product.variants[0] : null;
-      if (!variant) {
-        return null;
-      }
-
-      const price = Number(variant.price || 0);
-      const compareAt = Number(variant.compare_at_price || 0);
-      if (!(compareAt > price && price > 0)) {
-        return null;
-      }
-
-      if (tokens.length && scoreProduct(product, tokens) === 0) {
-        return null;
-      }
-
-      return {
-        product,
-        saved: compareAt - price,
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.saved - a.saved)
-    .slice(0, 5)
-    .map((row) => {
-      const normalized = normalizeStorefrontProduct(row.product);
-      const variant = Array.isArray(row.product.variants) && row.product.variants.length
-        ? row.product.variants[0]
-        : null;
-      const compareAt = variant && variant.compare_at_price ? Number(variant.compare_at_price) : 0;
-      return {
-        ...normalized,
-        comparePrice: compareAt > 0 ? formatPrice(compareAt) : normalized.comparePrice,
-      };
+      track.appendChild(card);
     });
-}
 
-async function fetchStoreProducts() {
-  if (Array.isArray(pcbCache.products)) {
-    return pcbCache.products;
+    return track;
   }
 
-  try {
-    const response = await fetch("/products.json?limit=120");
-    if (!response.ok) {
-      pcbCache.products = [];
-      return pcbCache.products;
-    }
-    const data = await response.json();
-    pcbCache.products = Array.isArray(data.products) ? data.products : [];
-    return pcbCache.products;
-  } catch (_error) {
-    pcbCache.products = [];
-    return pcbCache.products;
-  }
-}
+  // ─── Quick replies ────────────────────────────────────────────────────────────
 
-async function collectKnownResources(definitions) {
-  const resources = [];
-  for (const definition of definitions) {
-    const path = await findFirstReachablePath(definition.paths || []);
-    if (!path) {
-      continue;
-    }
-    resources.push({
-      title: definition.title,
-      type: definition.type || "Info",
-      url: path,
-      description: `Open ${definition.title.toLowerCase()}`,
+  function renderQuickReplies(container, replies, onSend) {
+    container.innerHTML = "";
+    const safeReplies = Array.isArray(replies) ? replies.slice(0, 8) : [];
+    safeReplies.forEach((text) => {
+      const chip = createElement("button", "pcb-chip", { type: "button" });
+      chip.textContent = String(text || "").trim();
+      chip.addEventListener("click", () => {
+        void onSend(chip.textContent);
+      });
+      container.appendChild(chip);
     });
   }
-  return resources;
-}
 
-async function findFirstReachablePath(paths) {
-  for (const path of paths) {
-    if (!path) {
-      continue;
+  function renderResources(container, resources) {
+    const section = container.closest(".pcb-resources");
+    if (!resources.length) {
+      if (section) section.classList.add("pcb-hidden");
+      return;
     }
-
-    if (pcbCache.pathStatus.has(path)) {
-      if (pcbCache.pathStatus.get(path)) {
-        return path;
-      }
-      continue;
-    }
-
-    try {
-      const response = await fetch(path);
-      const ok = response.ok;
-      pcbCache.pathStatus.set(path, ok);
-      if (ok) {
-        return path;
-      }
-    } catch (_error) {
-      pcbCache.pathStatus.set(path, false);
-    }
-  }
-  return "";
-}
-
-async function fetchPolicySnippet(path) {
-  if (pcbCache.policySnippet.has(path)) {
-    return pcbCache.policySnippet.get(path);
+    if (section) section.classList.remove("pcb-hidden");
+    container.innerHTML = "";
+    resources.forEach((r) => {
+      const card = createElement("a", "pcb-resource-card", {
+        href: r.url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+      });
+      const top = createElement("div", "pcb-resource-top");
+      const title = createElement("span", "pcb-resource-title");
+      title.textContent = r.title;
+      const type = createElement("span", "pcb-resource-type");
+      type.textContent = r.type;
+      top.appendChild(title);
+      top.appendChild(type);
+      const desc = createElement("p", "pcb-resource-desc");
+      desc.textContent = r.description;
+      card.appendChild(top);
+      card.appendChild(desc);
+      container.appendChild(card);
+    });
   }
 
-  try {
-    const response = await fetch(path);
-    if (!response.ok) {
-      pcbCache.policySnippet.set(path, "");
-      return "";
-    }
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-    const text = (doc.body && doc.body.textContent ? doc.body.textContent : "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const snippet = text.length > 220 ? `${text.slice(0, 220)}...` : text;
-    pcbCache.policySnippet.set(path, snippet);
-    return snippet;
-  } catch (_error) {
-    pcbCache.policySnippet.set(path, "");
-    return "";
+  // ─── Utility functions ────────────────────────────────────────────────────────
+
+  function renderMarkdownLight(text) {
+    return escHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      .replace(/\n/g, "<br>");
   }
-}
 
-function normalizeStorefrontProduct(product) {
-  const variant = Array.isArray(product.variants) && product.variants.length ? product.variants[0] : null;
-  const rawPrice = variant && variant.price ? Number(variant.price) : 0;
-  const rawCompareAt = variant && variant.compare_at_price ? Number(variant.compare_at_price) : 0;
-  const handle = product.handle || "";
-  const image = Array.isArray(product.images) && product.images.length ? product.images[0] : "";
+  function escHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
 
-  return {
-    title: product.title || "Product",
-    price: rawPrice > 0 ? formatPrice(rawPrice) : "",
-    comparePrice: rawCompareAt > rawPrice && rawPrice > 0 ? formatPrice(rawCompareAt) : "",
-    url: normalizeProductUrl(handle, product.title),
-    image: typeof image === "string" ? image : "",
-  };
-}
-
-function scoreProduct(product, tokens) {
-  const haystack = [
-    product.title,
-    product.product_type,
-    product.vendor,
-    product.tags,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  let score = 0;
-  tokens.forEach((token) => {
-    if (haystack.includes(token)) {
-      score += token.length > 4 ? 2 : 1;
-    }
-  });
-  return score;
-}
-
-function normalizeProducts(rawProducts) {
-  if (!Array.isArray(rawProducts)) {
+  async function resolveProductsForSlider(text, rawProducts, cfg) {
+    if (!cfg.showProductSlider) return [];
+    let products = normalizeProducts(rawProducts || []);
+    if (products.length) return products.slice(0, cfg.sliderLimit);
     return [];
   }
 
-  return rawProducts
-    .map((item) => {
-      const title = item.title || item.name || "";
-      const url = normalizeProductUrl(
-        item.url || item.link || item.onlineStoreUrl || item.online_store_url || item.handle,
-        title,
-      );
-      const image = item.image || item.imageUrl || item.thumbnail || "";
-      const price = normalizePriceValue(item.price || item.formattedPrice || item.amount);
-      const comparePrice = normalizePriceValue(
-        item.comparePrice ||
-          item.compare_at_price ||
-          item.compareAtPrice ||
-          item.formattedComparePrice,
-      );
-      return {
-        title: String(title || "Product"),
-        url: String(url || normalizeProductUrl("", title)),
-        image: String(image || ""),
-        price: String(price || ""),
-        comparePrice: String(comparePrice || ""),
-      };
-    })
-    .filter((item) => item.title);
-}
-
-function normalizeResources(rawResources) {
-  if (!Array.isArray(rawResources)) {
-    return [];
-  }
-
-  return rawResources
-    .map((item) => ({
-      title: String(item.title || item.name || "Store link"),
-      url: String(item.url || item.link || "#"),
-      type: String(item.type || "Info"),
-      description: String(item.description || "Open details"),
-    }))
-    .filter((item) => item.title && item.url);
-}
-
-function normalizeReplyText(data) {
-  if (!data || typeof data !== "object") {
-    return "";
-  }
-
-  const direct =
-    data.reply ||
-    data.message ||
-    data.answer ||
-    data.text;
-
-  if (typeof direct === "string" && direct.trim()) {
-    return direct.trim();
-  }
-
-  if (Array.isArray(data.messages)) {
-    const botMessage = data.messages.find((message) => message && message.role === "assistant");
-    if (botMessage && typeof botMessage.content === "string") {
-      return botMessage.content.trim();
-    }
-  }
-
-  return "";
-}
-
-function pushMessage(state, config, role, text, countUnread, options = {}) {
-  const normalizedProducts = Array.isArray(options.products)
-    ? normalizeProducts(options.products).slice(0, Math.max(1, Number(config?.sliderLimit) || 5))
-    : [];
-  const entry = {
-    role: role === "user" ? "user" : "bot",
-    text: String(text || "").trim(),
-    timestamp: Date.now(),
-    products: normalizedProducts,
-  };
-  if (!entry.text) {
-    return;
-  }
-
-  state.history.push(entry);
-  state.history = state.history.slice(-40);
-  saveHistory(config.storageKey, state.history);
-
-  if (countUnread && entry.role === "bot") {
-    state.unread += 1;
-  }
-}
-
-function loadHistory(storageKey) {
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed
-      .filter((entry) => entry && (entry.role === "user" || entry.role === "bot") && typeof entry.text === "string")
-      .map((entry) => {
-        const products = Array.isArray(entry.products)
-          ? normalizeProducts(entry.products).slice(0, 10)
-          : [];
+  function normalizeProducts(rawProducts) {
+    if (!Array.isArray(rawProducts)) return [];
+    return rawProducts
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const title = String(item.title || item.name || "").trim();
+        if (!title) return null;
+        const url = normalizeProductUrl(
+          item.url || item.handle ? `/products/${item.handle}` : "",
+          title,
+        );
         return {
-          role: entry.role,
-          text: entry.text,
-          timestamp: Number(entry.timestamp) || Date.now(),
-          products,
+          id: item.id || null,
+          title,
+          handle: item.handle || null,
+          url,
+          image: item.image || item.imageUrl || item.img || "",
+          imageAlt: item.imageAlt || title,
+          price: item.price || "",
+          comparePrice: item.comparePrice || item.compare_at_price || "",
+          currency: item.currency || "INR",
+          available: item.available !== false,
+          variantId: item.variantId || null,
+          tags: item.tags || [],
         };
       })
-      .slice(-40);
-  } catch (_error) {
-    return [];
+      .filter(Boolean);
   }
-}
 
-function saveHistory(storageKey, history) {
-  try {
-    localStorage.setItem(storageKey, JSON.stringify(history));
-  } catch (_error) {
-    // Ignore storage failures (private mode or quota restrictions).
+  function normalizeResources(rawResources) {
+    if (!Array.isArray(rawResources)) return [];
+    return rawResources
+      .map((item) => ({
+        title: String(item.title || item.name || "Store link"),
+        url: String(item.url || item.link || "#"),
+        type: String(item.type || "Info"),
+        description: String(item.description || "Open details"),
+      }))
+      .filter((r) => r.title && r.url);
   }
-}
 
-function syncBadge(badge, count) {
-  if (!badge) {
-    return;
+  function pushMessage(state, config, role, text, countUnread, options = {}) {
+    const normalizedProducts = Array.isArray(options.products)
+      ? normalizeProducts(options.products).slice(0, Math.max(1, Number(config?.sliderLimit) || 5))
+      : [];
+    const entry = {
+      role: role === "user" ? "user" : "bot",
+      text: String(text || "").trim(),
+      timestamp: Date.now(),
+      products: normalizedProducts,
+      type: options.type || "text",
+      data: options.data || null,
+    };
+    if (!entry.text) return;
+
+    state.history.push(entry);
+    state.history = state.history.slice(-40);
+    saveHistory(config.storageKey, state.history);
+
+    if (countUnread && entry.role === "bot") state.unread += 1;
   }
-  badge.textContent = String(count);
-  badge.classList.toggle("pcb-hidden", count <= 0);
-}
 
-function showTyping(typingNode, show) {
-  if (!typingNode) {
-    return;
-  }
-  typingNode.classList.toggle("pcb-hidden", !show);
-}
+  function loadHistory(storageKey) {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
 
-function syncSendState(input, button, busy) {
-  const canSend = !!input.value.trim() && !busy;
-  button.disabled = !canSend;
-}
-
-function scrollMessagesToBottom(messages) {
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function parseQuickReplies(value) {
-  if (!value || typeof value !== "string") {
-    return [];
-  }
-  return value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .slice(0, 8);
-}
-
-function parseBoolean(value) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  const normalized = String(value || "").toLowerCase();
-  return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
-}
-
-function normalizeApiBaseUrl(url) {
-  if (!url || typeof url !== "string") {
-    return "";
-  }
-  const trimmed = url.trim();
-  if (!trimmed) {
-    return "";
-  }
-  return trimmed.replace(/\/+$/, "");
-}
-
-function getOrCreateStorageValue(key, generator) {
-  try {
-    const existing = localStorage.getItem(key);
-    if (existing) {
-      return existing;
+      return parsed
+        .filter(
+          (e) =>
+            e &&
+            (e.role === "user" || e.role === "bot") &&
+            typeof e.text === "string",
+        )
+        .map((e) => ({
+          role: e.role,
+          text: e.text,
+          timestamp: Number(e.timestamp) || Date.now(),
+          products: Array.isArray(e.products) ? normalizeProducts(e.products).slice(0, 10) : [],
+          type: e.type || "text",
+          data: e.data || null,
+        }))
+        .slice(-40);
+    } catch (_e) {
+      return [];
     }
-    const value = generator(key);
-    localStorage.setItem(key, value);
-    return value;
-  } catch (_error) {
-    return generator(key);
-  }
-}
-
-function createVisitorId(seed) {
-  const random = Math.random().toString(36).slice(2, 10);
-  const source = `${seed || "visitor"}:${Date.now()}:${random}`;
-  return `v_${simpleHash(source)}`;
-}
-
-function createSessionId(seed) {
-  const random = Math.random().toString(36).slice(2, 8);
-  return `s_${simpleHash(`${seed || "session"}:${Date.now()}:${random}`)}`;
-}
-
-function simpleHash(input) {
-  const text = String(input || "");
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-function createElement(tagName, className, attrs) {
-  const node = document.createElement(tagName);
-  if (className) {
-    node.className = className;
-  }
-  if (attrs && typeof attrs === "object") {
-    Object.entries(attrs).forEach(([key, value]) => {
-      node.setAttribute(key, value);
-    });
-  }
-  return node;
-}
-
-function iconNode(className, pathD) {
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  if (className) {
-    svg.setAttribute("class", className);
   }
 
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", pathD);
-  svg.appendChild(path);
-
-  return svg;
-}
-
-function sanitizeColor(value) {
-  const color = String(value || "").trim();
-  const hexMatch = color.match(/^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/);
-  return hexMatch ? color : "#008060";
-}
-
-function darkenColor(hex, amountPercent) {
-  const parsed = expandHex(hex);
-  const amount = Math.max(0, Math.min(100, amountPercent)) / 100;
-  const r = Math.max(0, Math.round(parsed.r * (1 - amount)));
-  const g = Math.max(0, Math.round(parsed.g * (1 - amount)));
-  const b = Math.max(0, Math.round(parsed.b * (1 - amount)));
-  return rgbToHex(r, g, b);
-}
-
-function expandHex(hex) {
-  const normalized = hex.replace("#", "");
-  const raw = normalized.length === 3
-    ? normalized
-        .split("")
-        .map((c) => c + c)
-        .join("")
-    : normalized;
-  return {
-    r: parseInt(raw.slice(0, 2), 16),
-    g: parseInt(raw.slice(2, 4), 16),
-    b: parseInt(raw.slice(4, 6), 16),
-  };
-}
-
-function rgbToHex(r, g, b) {
-  const toHex = (value) => value.toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-function matchesAny(text, terms) {
-  const source = String(text || "").toLowerCase();
-  if (!source || !Array.isArray(terms)) {
-    return false;
+  function saveHistory(storageKey, history) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(history));
+    } catch (_e) {}
   }
 
-  return terms.some((term) => source.includes(String(term || "").toLowerCase()));
-}
-
-function formatPrice(amount) {
-  const value = Number(amount);
-  if (!Number.isFinite(value)) {
-    return "";
+  function syncBadge(badge, count) {
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.classList.toggle("pcb-hidden", count <= 0);
   }
 
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch (_error) {
-    return `$${value.toFixed(2)}`;
-  }
-}
-
-function formatMoneyAmount(amount, currencyCode) {
-  const value = Number(amount);
-  if (!Number.isFinite(value)) {
-    return "";
+  function showTyping(typingNode, show) {
+    if (!typingNode) return;
+    typingNode.classList.toggle("pcb-hidden", !show);
   }
 
-  const currency = String(currencyCode || "USD").toUpperCase();
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch (_error) {
-    return formatPrice(value);
-  }
-}
-
-function normalizePriceValue(rawValue) {
-  if (rawValue === null || rawValue === undefined) {
-    return "";
+  function syncSendState(input, button, busy) {
+    button.disabled = !input.value.trim() || busy;
   }
 
-  if (typeof rawValue === "number") {
-    return formatPrice(rawValue);
+  function scrollMessagesToBottom(messages) {
+    messages.scrollTop = messages.scrollHeight;
   }
 
-  const text = String(rawValue).trim();
-  if (!text) {
-    return "";
+  function parseQuickReplies(value) {
+    if (!value || typeof value !== "string") return [];
+    return value
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean)
+      .slice(0, 8);
   }
 
-  const numeric = Number(text.replace(/[^0-9.-]/g, ""));
-  if (Number.isFinite(numeric) && /[0-9]/.test(text) && !/[$€£₹]/.test(text)) {
-    return formatPrice(numeric);
+  function parseBoolean(value) {
+    if (typeof value === "boolean") return value;
+    const n = String(value || "").toLowerCase();
+    return n === "true" || n === "1" || n === "yes" || n === "on";
   }
 
-  return text;
-}
+  function normalizeApiBaseUrl(url) {
+    if (!url || typeof url !== "string") return "";
+    return url.trim().replace(/\/+$/, "");
+  }
 
-function normalizeProductUrl(rawUrl, title) {
-  const value = String(rawUrl || "").trim();
-  if (value) {
-    if (/^https?:\/\//i.test(value)) {
+  function getOrCreateStorageValue(key, generator) {
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing) return existing;
+      const value = generator(key);
+      localStorage.setItem(key, value);
       return value;
+    } catch (_e) {
+      return generator(key);
     }
-    if (value.startsWith("/")) {
-      return value;
+  }
+
+  function createVisitorId(seed) {
+    const random = Math.random().toString(36).slice(2, 10);
+    const source = `${seed || "visitor"}:${Date.now()}:${random}`;
+    return `v_${simpleHash(source)}`;
+  }
+
+  function createSessionId(seed) {
+    const random = Math.random().toString(36).slice(2, 8);
+    return `s_${simpleHash(`${seed || "session"}:${Date.now()}:${random}`)}`;
+  }
+
+  function simpleHash(input) {
+    const text = String(input || "");
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash << 5) - hash + text.charCodeAt(i);
+      hash |= 0;
     }
-    if (value.startsWith("products/") || value.startsWith("collections/")) {
-      return `/${value}`;
+    return Math.abs(hash).toString(36);
+  }
+
+  function createElement(tagName, className, attrs) {
+    const node = document.createElement(tagName);
+    if (className) node.className = className;
+    if (attrs) Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
+    return node;
+  }
+
+  function iconNode(className, pathD) {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    if (className) svg.setAttribute("class", className);
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", pathD);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function sanitizeColor(value) {
+    const color = String(value || "").trim();
+    return /^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/.test(color) ? color : "#008060";
+  }
+
+  function darkenColor(hex, amountPercent) {
+    const parsed = expandHex(hex);
+    const amount = Math.max(0, Math.min(100, amountPercent)) / 100;
+    const r = Math.max(0, Math.round(parsed.r * (1 - amount)));
+    const g = Math.max(0, Math.round(parsed.g * (1 - amount)));
+    const b = Math.max(0, Math.round(parsed.b * (1 - amount)));
+    return rgbToHex(r, g, b);
+  }
+
+  function expandHex(hex) {
+    const normalized = hex.replace("#", "");
+    const raw =
+      normalized.length === 3
+        ? normalized
+            .split("")
+            .map((c) => c + c)
+            .join("")
+        : normalized;
+    return {
+      r: parseInt(raw.slice(0, 2), 16),
+      g: parseInt(raw.slice(2, 4), 16),
+      b: parseInt(raw.slice(4, 6), 16),
+    };
+  }
+
+  function rgbToHex(r, g, b) {
+    const toHex = (v) => v.toString(16).padStart(2, "0");
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  }
+
+  function matchesAny(text, terms) {
+    const source = String(text || "").toLowerCase();
+    if (!source || !Array.isArray(terms)) return false;
+    return terms.some((t) => source.includes(String(t || "").toLowerCase()));
+  }
+
+  function formatMoneyAmount(amount, currencyCode) {
+    const value = Number(amount);
+    if (!Number.isFinite(value)) return "";
+    const currency = String(currencyCode || "INR").toUpperCase();
+    try {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(value);
+    } catch (_e) {
+      return `₹${value.toFixed(0)}`;
     }
-    return `/products/${value.replace(/^\/+/, "")}`;
   }
 
-  const fallbackQuery = String(title || "").trim();
-  if (fallbackQuery) {
-    return `/search?q=${encodeURIComponent(fallbackQuery)}`;
+  function normalizeProductUrl(rawUrl, title) {
+    const value = String(rawUrl || "").trim();
+    if (value) {
+      if (/^https?:\/\//i.test(value)) return value;
+      if (value.startsWith("/")) return value;
+      if (value.startsWith("products/") || value.startsWith("collections/")) return `/${value}`;
+      return `/products/${value.replace(/^\/+/, "")}`;
+    }
+    const fallback = String(title || "").trim();
+    return fallback ? `/search?q=${encodeURIComponent(fallback)}` : "/collections/all";
   }
-  return "/collections/all";
-}
 
-function tokenize(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((token) => token.length > 2)
-    .slice(0, 8);
-}
-
-function getInitials(name) {
-  const words = String(name || "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (!words.length) {
-    return "AI";
+  function getInitials(name) {
+    const words = String(name || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!words.length) return "AI";
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
   }
-  if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
-  }
-  return `${words[0][0]}${words[1][0]}`.toUpperCase();
-}
 
-function clampNumber(value, min, max, fallback) {
-  if (Number.isNaN(value)) {
-    return fallback;
+  function clampNumber(value, min, max, fallback) {
+    if (Number.isNaN(value)) return fallback;
+    return Math.min(max, Math.max(min, value));
   }
-  return Math.min(max, Math.max(min, value));
-}
 
-function formatClock(timestamp) {
-  try {
-    return new Date(timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch (_error) {
-    return "";
+  function formatClock(timestamp) {
+    try {
+      return new Date(timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (_e) {
+      return "";
+    }
   }
-}
-
 })();
